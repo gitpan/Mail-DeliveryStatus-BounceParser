@@ -1,4 +1,5 @@
 BounceParser.pm
+Report.pm
 Changes
 Makefile.PL
 MANIFEST

@@ -40,8 +40,7 @@ use 5.00503;
 use strict;
 
 use vars qw($VERSION $DEBUG);
-($VERSION) = '$Id: BounceParser.pm,v 1.3 2003/06/10 00:15:53 devel Exp $' =~ /([\d.]{3,})/;
-($VERSION) = '$Revision: 1.3 $' =~ /([\d.]{3,})/;
+($VERSION) = '$Id: BounceParser.pm,v 1.4 2003/06/10 13:43:27 devel Exp $' =~ /([\d.]{3,})/;
 $DEBUG = 0;
 
 use MIME::Parser;
