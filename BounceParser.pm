@@ -40,8 +40,8 @@ use 5.00503;
 use strict;
 
 use vars qw($VERSION $DEBUG);
-($VERSION) = '$Id: BounceParser.pm,v 1.2 2003/06/06 17:58:47 devel Exp $' =~ /([\d.]{3,})/;
-($VERSION) = '$Revision: 1.2 $' =~ /([\d.]{3,})/;
+($VERSION) = '$Id: BounceParser.pm,v 1.3 2003/06/10 00:15:53 devel Exp $' =~ /([\d.]{3,})/;
+($VERSION) = '$Revision: 1.3 $' =~ /([\d.]{3,})/;
 $DEBUG = 0;
 
 use MIME::Parser;
@@ -58,10 +58,6 @@ my @Preprocessors = qw(p_ms
                        p_plain_smtp_transcript
 		       );
 
-=head2 ->new()
-
-=cut
-
 sub log {
   my $self = shift;
   if (ref $self->{'log'} eq "CODE") { $self->{'log'}->(@_); }
@@ -77,8 +73,10 @@ sub new {
   
   my %opts   = (); for (reverse 0 .. $#_) { if (ref $_[$_] eq "HASH" ) { %opts  = (%opts, %{$_[$_]}); splice(@_, $_, 1) } }
 
-=pod
+=head2 ->new()
+
 OPTIONS.  If you pass BounceParser->new(..., {log=>sub { ... }}) That will be used as a logging callback.
+
 =cut
 
   if    (not @_)               { print STDERR "BounceParser: expecting bounce mesage on STDIN\n" if -t STDIN;
@@ -230,6 +228,7 @@ in the reports, pass the option {report_non_bounces=>1}.
   if (! $self->{'orig_message_id'}) {
       $self->log("couldn't find original message id.");
   }
+
 =head2 ->reports()
 
 Each $report returned by $bounce->reports() is basically a
@@ -608,7 +607,8 @@ it under the same terms as Perl itself.
 
 =head1 WITH A SHOUT OUT TO
 
-  the folks on #perl: coraline, Fletch, TorgoX, a-mused, et al
+  coraline, Fletch, TorgoX, mjd, a-mused, Masque, gbarr,
+  sungo, dngor, and all the other hoopy froods on #perl
 
 =cut
 
