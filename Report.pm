@@ -7,9 +7,9 @@ use vars qw(@ISA);
 # i just don't like how Mail::Header leaves a \n at the end of everything
 # meng
 
-sub get { 
-  my $string = $_[0]->SUPER::get($_[1]); 
-  chomp($string=(defined $string && length $string) ? $string : ""); 
+sub get {
+  my $string = $_[0]->SUPER::get($_[1]);
+  chomp($string=(defined $string && length $string) ? $string : "");
   $string;
 }
 

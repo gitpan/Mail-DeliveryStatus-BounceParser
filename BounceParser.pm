@@ -40,13 +40,31 @@ use 5.00503;
 use strict;
 
 use vars qw($VERSION $DEBUG);
-($VERSION) = '$Id: BounceParser.pm,v 1.4 2003/06/10 13:43:27 devel Exp $' =~ /([\d.]{3,})/;
+$VERSION = '1.5';
 $DEBUG = 0;
 
 use MIME::Parser;
 use Mail::DeliveryStatus::Report;
 
-my $Not_An_Error = qr/delayed|warning|transient.*error|Your message.*was delivered to the following recipient/is;
+my $Not_An_Error = qr[
+    \b delayed \b
+  | \b warning \b
+  | transient .{0,20} error
+  | Your \s message .{0,100} was \s delivered \s to \s the \s following \s recipient
+]six;
+
+my $Really_An_Error = qr[
+    this \s is \s a \s permanent \s error
+]six;
+
+my $Returned_Message_Below = qr[(
+    (?:original|returned) \s message \s (?:follows|below)
+  | (?: this \s is \s a \s copy \s of
+      | below \s this \s line \s is \s a \s copy
+    ) .{0,100} \s message
+  | message \s header \s follows
+  | ^ (?:return-path|received|from):
+)]sixm;
 
 my @Preprocessors = qw(p_ms
                        p_ims
@@ -55,6 +73,7 @@ my @Preprocessors = qw(p_ms
 		       p_novell_groupwise_5_2
                        p_aol_bogus_250
                        p_plain_smtp_transcript
+                       p_xdelivery_status
 		       );
 
 sub log {
@@ -66,10 +85,17 @@ sub log {
 sub new {
   # my $bounce = Mail::DeliveryStatus::BounceParser->new( \*STDIN | $fh | "entire\nmessage" | ["array","of","lines"] );
 
+  # XXX: It turns out that MIME::Decoder::QuotedPrint (in MIME-tools up to
+  # at least 5.417) assigns to $_ without localizing it first (see
+  # http://rt.cpan.org/NoAuth/Bug.html?id=11802).  There are various code
+  # paths that can lead to QP messages being decoded or encoded, so to
+  # simplify matters, we do this before anything else.
+  local $_;
+
   my $class = shift;
   my $parser = new MIME::Parser; $parser->output_to_core(1);
   my $message;
-  
+
   my %opts   = (); for (reverse 0 .. $#_) { if (ref $_[$_] eq "HASH" ) { %opts  = (%opts, %{$_[$_]}); splice(@_, $_, 1) } }
 
 =head2 ->new()
@@ -104,6 +130,8 @@ OPTIONS.  If you pass BounceParser->new(..., {log=>sub { ... }}) That will be us
 
   $self->log("now the message is type " . $message->effective_type . ", subject " . $message->head->get("subject"));
 
+  my $first_part = first_non_multi_part($message);
+
 =pod
 
 NON-BOUNCES.  If the message is recognizably a vacation
@@ -121,14 +149,41 @@ in the reports, pass the option {report_non_bounces=>1}.
 
   # we'll deem autoreplies to be usually less than a certain size.
 
-  if ($message->effective_type eq "text/plain"
-      and ((length ($message->as_string) < 3000)
-	   and $message->as_string =~ /auto.*repl|vacation|(out|away).*office/is)) {
-    $self->log("looks like a vacation autoreply, ignoring.");
-    $self->{'type'} = "vacation autoreply";
-    $self->{'is_bounce'} = 0;
-    return $self;
+  # Some vacation autoreplies are (sigh) multipart/mixed, with an additional
+  # part containing a pointless disclaimer; some are multipart/alternative,
+  # with a pointless HTML part saying the exact same thing.  (Messages in
+  # this latter category have the decency to self-identify with things like
+  # '<META NAME="Generator" CONTENT="MS Exchange Server version
+  # 5.5.2653.12">', so we know to avoid such software in future.)  So look
+  # at the first part of a multipart message (recursively, down the tree).
+
+  {
+      last if $message->effective_type eq 'multipart/report';
+      last if !$first_part || $first_part->effective_type ne 'text/plain';
+      my $string = $first_part->as_string;
+      last if length($string) > 3000;
+      last if $string !~ /auto.*repl|vacation|(out|away|on holiday).*office/is;
+      $self->log("looks like a vacation autoreply, ignoring.");
+      $self->{'type'} = "vacation autoreply";
+      $self->{'is_bounce'} = 0;
+      return $self;
   }
+
+
+  # "Email address changed but your message has been forwarded"
+  {
+      last if $message->effective_type eq 'multipart/report';
+      last if !$first_part || $first_part->effective_type ne 'text/plain';
+      my $string = $first_part->as_string;
+      last if length($string) > 3000;
+      last if $string !~ /(address .{0,60} changed | domain .{0,40} retired) .*
+                          (has\s*been|was|have|will\s*be) \s* (forwarded|delivered)/six;
+      $self->log('looks like an informational address-change autoreply, ignoring.');
+      $self->{'type'} = 'informational address-change autoreply';
+      $self->{'is_bounce'} = 0;
+      return $self;
+  }
+
 
 # Network Associates WebShield SMTP V4.5 MR1a on cpwebshield intercepted a mail from
 # <owner-aftermba@v2.listbox.com> which caused the Content Filter Block extension COM to
@@ -158,45 +213,54 @@ in the reports, pass the option {report_non_bounces=>1}.
   # address is johnkingburns@cs.com and CompuServe has automatically forwarded
   # your message. Please take this opportunity to update your address book with
   # the new e-mail address.
-  # 
+  #
 
-  if ($message->effective_type eq "text/plain"
-      and
-      $message->bodyhandle->as_string =~ /automatically.*forwarded/is) {
-    $self->log("message forwarding notification, ignoring");
-    $self->{'is_bounce'} = 0;
-    return $self;
-  }
-
-  # nonfatal errors usually say they're transient
-  if ($message->effective_type eq "text/plain"
-    and $message->bodyhandle->as_string =~ $Not_An_Error) {
-    $self->log("transient error, ignoring.");
-    $self->{'is_bounce'} = 0;
-    return $self;
-  }
-
-  # nonfatal errors usually say they're transient, but sometimes they do it straight out and sometimes it's wrapped in a multipart/report.
-  { my $part_for_maybe_transient;
-    
-    ($part_for_maybe_transient) =                                            ($message)       if $message->effective_type eq "text/plain";
-    ($part_for_maybe_transient) = grep { $_->effective_type eq "text/plain" } $message->parts if $message->effective_type =~ /multipart/;
-    
-    if ($part_for_maybe_transient and $part_for_maybe_transient->bodyhandle->as_string =~ $Not_An_Error) {
-      $self->log("transient error, ignoring.");
+  if ($message->effective_type eq "text/plain") {
+    my $string = $message->bodyhandle->as_string;
+    my $forwarded_pos = match_position($string, qr/automatically.{0,40}forwarded/is);
+    my $orig_msg_pos  = match_position($string, $Returned_Message_Below);
+    if (defined($forwarded_pos) && position_before($forwarded_pos, $orig_msg_pos)) {
+      $self->log("message forwarding notification, ignoring");
       $self->{'is_bounce'} = 0;
       return $self;
     }
   }
 
-  # 
+  # nonfatal errors usually say they're transient, but sometimes they do it
+  # straight out and sometimes it's wrapped in a multipart/report.
+  #
+  # Be careful not to examine a returned body for the transient-only signature:
+  # $Not_An_Error can match the single words 'delayed' and 'warning', which
+  # could quite reasonably occur in the body of the returned message.  This
+  # also means it's worth additionally checking for a regex that gives a very
+  # strong indication that the error was permanent.
+  { my $part_for_maybe_transient;
+    ($part_for_maybe_transient) =                                            ($message)       if $message->effective_type eq "text/plain";
+    ($part_for_maybe_transient) = grep { $_->effective_type eq "text/plain" } $message->parts if $message->effective_type =~ /multipart/ && $message->effective_type ne 'multipart/report';
+
+    if ($part_for_maybe_transient) {
+      my $string = $part_for_maybe_transient->bodyhandle->as_string;
+      my $transient_pos = match_position($string, $Not_An_Error);
+      last if !defined $transient_pos;
+      my $permanent_pos = match_position($string, $Really_An_Error);
+      my $orig_msg_pos  = match_position($string, $Returned_Message_Below);
+      last if position_before($permanent_pos, $orig_msg_pos);
+      if (position_before($transient_pos, $orig_msg_pos)) {
+        $self->log("transient error, ignoring.");
+        $self->{'is_bounce'} = 0;
+        return $self;
+      }
+    }
+  }
+
+  #
   # in all cases we will read the message body to try to pull out a message-id.
-  # 
+  #
 
   if ($message->effective_type =~ /multipart/) { # "Internet Mail Service" sends multipart/mixed which still has a message/rfc822 in it
-  
+
     # $self->log("now going to try to find the original message id.") if $DEBUG > 3;
-  
+
     if (my ($orig_message) = grep { $_->effective_type eq "message/rfc822" } $message->parts) {
       chomp(my $orig_message_id = $orig_message->parts(0)->head->get("message-id")); # see MIME::Entity regarding REPLACE
       $self->log("extracted original message-id $orig_message_id from the original rfc822/message");
@@ -206,7 +270,7 @@ in the reports, pass the option {report_non_bounces=>1}.
 
     # todo: handle pennwomen-la@v2.listbox.com/200209/19/1032468832.1444_1.frodo |less
     # which is a multipart/mixed containing an application/tnef instead of a message/rfc822.  yow!
-    
+
     if (! $self->{'orig_message_id'}
 	and
 	my ($rfc822_headers) = grep { lc $_->effective_type eq "text/rfc822-headers" } $message->parts) {
@@ -215,7 +279,7 @@ in the reports, pass the option {report_non_bounces=>1}.
       $self->{'orig_header'} = $orig_head;
       $self->log("extracted original message-id $self->{'orig_message_id'} from text/rfc822-headers");
     }
-    
+
   }
   if (! $self->{'orig_message_id'}) {
     if ($message->bodyhandle and $message->bodyhandle->as_string =~ /Message-ID: (\S+)/i) {
@@ -283,10 +347,10 @@ information as it can; in particular, you can count on
 
 =cut --------------------------------------------------
 
-  # 
+  #
   # try to extract email addresses to identify members.
   # we will also try to extract reasons as much as we can.
-  # 
+  #
 
   if ($message->effective_type eq "multipart/report") {
     my ($delivery_status) = grep { $_->effective_type eq "message/delivery-status" } $message->parts;
@@ -296,10 +360,41 @@ information as it can; in particular, you can count on
     my %global = ("reporting-mta" => undef,
 		  "arrival-date"  => undef);
 
-    foreach my $para (split /\n\n/, $delivery_status->bodyhandle->as_string) {
+    my ($seen_action_expanded, $seen_action_failed);
+
+    # Some MTAs generate malformed multipart/report messages with no
+    # message/delivery-status part; don't die in such cases.
+    my $delivery_status_body = eval { $delivery_status->bodyhandle->as_string } || '';
+
+    foreach my $para (split /\n\n/, $delivery_status_body) {
 
       my $report = Mail::Header->new([split /\n/, $para]); $report->combine(); $report->unfold;
-      
+
+      # Some MTAs send unsought delivery-status notifications indicating
+      # success; others send RFC1892/RFC3464 delivery status notifications
+      # for transient failures.
+      if (my $action = lc $report->get('Action')) {
+          $action =~ s/^\s+//;
+          if ($action =~ s/^\s*([a-z]+)\b.*/$1/s) {
+              # In general, assume that anything other than 'failed' is a
+              # non-bounce; but 'expanded' is handled after the end of this
+              # foreach loop, because it might be followed by another
+              # per-recipient group that says 'failed'.
+              if ($action eq 'expanded') {
+                  $seen_action_expanded = 1;
+              }
+              elsif ($action eq 'failed') {
+                  $seen_action_failed   = 1;
+              }
+              else {
+                  $self->log("message/delivery-status says 'Action: \L$1'");
+                  $self->{'type'} = 'delivery-status \L$1';
+                  $self->{'is_bounce'} = 0;
+                  return $self;
+              }
+          }
+      }
+
       for (qw(Reporting-MTA Arrival-Date)) { $report->replace($_ => $global{$_} ||= $report->get($_)) }
 
       my $email = $report->get("original-recipient") || $report->get("final-recipient") || next;
@@ -321,7 +416,7 @@ information as it can; in particular, you can count on
 
       if (not $report->get("host")) { $report->replace(host => ($report->get("email") =~ /\@(.+)/)[0]) }
 
-      if ($report->get("smtp_code") =~ /^2../) { 
+      if ($report->get("smtp_code") =~ /^2../) {
 	$self->log("smtp code is " . $report->get("smtp_code") . "; no_problemo.");
 
 	unless ($report->get("host") =~ /\baol\.com$/i) {
@@ -339,8 +434,17 @@ information as it can; in particular, you can count on
       }
 
       # $self->log("learned about $email: " . $report->get("std_reason")) if $DEBUG > 3;
-      
+
       push @{$self->{'reports'}}, Mail::DeliveryStatus::Report->new([split/\n/,$report->as_string]);
+    }
+
+    if ($seen_action_expanded && !$seen_action_failed) {
+        # We've seen at least one 'Action: expanded' DSN-field, but no
+        # 'Action: failed'
+        $self->log(q[message/delivery-status says 'Action: expanded']);
+        $self->{'type'} = 'delivery-status expanded';
+        $self->{'is_bounce'} = 0;
+        return $self;
     }
   }
 
@@ -349,36 +453,35 @@ information as it can; in particular, you can count on
     # $self->log("examining non-report multipart...") if $DEBUG > 3;
 
     # generated by IMS:
-    # 
+    #
     # Your message
-    # 
+    #
     #  To:      thood@edify.com
     #   Subject: Red and Blue Online - October 2002
     #     Sent:    Tue, 15 Oct 2002 13:08:24 -0700
-    # 
+    #
     # did not reach the following recipient(s):
-    # 
+    #
     # thood@eagle on Tue, 15 Oct 2002 13:18:39 -0700
     #     The recipient name is not recognized
     #         The MTS-ID of the original message is: c=us;a=
     # ;p=edify;l=EAGLE02101520184GF2XLBD
     #  MSEXCH:IMS:EDIFY:CORP:EAGLE 0 (000C05A6) Unknown Recipient
-    # 
+    #
 
     my @delivery_status_parts = grep { $_->effective_type !~ /rfc822|html/ and not $_->is_multipart } $message->parts;
 
     # $self->log("error parts: @{[ map { $_->bodyhandle->as_string } @delivery_status_parts ]}") if $DEBUG > 3;
 
     push @{$self->{'reports'}}, $self->extract_reports (@delivery_status_parts);
-  
+
   } else { # handle plain-text responses
-    
+
     # they usually say "returned message" somewhere, and we can split on that, above and below.
-    
-    my $tosplit = qr/(.*(?:original|returned) message (?:follows|below)|(?:this is a copy of.*|below this line is a copy.*)\smessage|message header follows|^(?:Return-Path|Received|From):)/im;
-    
-    if ($message->bodyhandle->as_string =~ $tosplit) {
-      my ($stuff_before, $stuff_splitted, $stuff_after) = split $tosplit, $message->bodyhandle->as_string, 3;
+
+    if ($message->bodyhandle->as_string =~ $Returned_Message_Below) {
+      my ($stuff_before, $stuff_splitted, $stuff_after) =
+          split $Returned_Message_Below, $message->bodyhandle->as_string, 3;
       # $self->log("splitting on \"$stuff_splitted\", " . length($stuff_before) . " vs " . length($stuff_after) . " bytes.") if $DEBUG > 3;
       push @{$self->{'reports'}}, $self->extract_reports ($stuff_before);
       $self->{'orig_text'} = $stuff_before;
@@ -415,9 +518,9 @@ sub extract_reports {
   # blah blah 1
   #             email@address 2
   # blah blah 2
-  # 
+  #
 
-  foreach my $line (split/\n/, $text) { 
+  foreach my $line (split/\n/, $text) {
     # $self->log("-ext- looking for error in $line") if $DEBUG > 3;
   }
 
@@ -454,7 +557,7 @@ sub extract_reports {
 			  raw   => join ("", @split[$i-1..$i+1]),
 			  std_reason => $std_reason,
 			};
-      
+
   }
 
   my @toreturn;
@@ -602,7 +705,7 @@ Meng Weng Wong, E<lt>mengwong+bounceparser@pobox.comE<gt>
    Meng Weng Wong <freeside>
 
 This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself. 
+it under the same terms as Perl itself.
 
 =head1 WITH A SHOUT OUT TO
 
@@ -660,13 +763,13 @@ sub p_ms {
   # Subject: Undeliverable Mail
   # X-Listbox-Reason: samantha.wright@msdw.com user unknown
   # Lines: 116
-  # 
+  #
   #    ----- The following addresses had permanent fatal errors -----
-  # 
+  #
   # wrights: User unknown
-  # 
+  #
   #    ----- Original message follows -----
-  # 
+  #
   # Received: from hqvsbh1.ms.com (hqvsbh1-i0.morgan.com [199.89.99.101])
   #         by pismh4.ms.com (8.8.5/imap+ldap v2.4) with ESMTP id QAA23003
   #         for <wrights@ms.com>; Thu, 19 Sep 2002 16:52:55 -0400 (EDT)
@@ -692,13 +795,13 @@ sub p_ms {
   # Subject: undeliverable mail for rchiri
   # X-Listbox-Reason: rchiri@emory.edu user unknown
   # Lines: 68
-  # 
+  #
   # The following errors occurred when trying to deliver the attached mail:
-  # 
+  #
   # rchiri: User unknown
-  # 
+  #
   # ------- The original message sent:
-  # 
+  #
   # Received: from frodo.listbox.com (frodo.listbox.com [208.210.125.58])
   #         by juliet.cc.emory.edu (8.10.2/8.10.2) with ESMTP id g8IGfT003531
   #         for <rchiri@emory.edu>; Wed, 18 Sep 2002 12:41:29 -0400 (EDT)
@@ -715,13 +818,13 @@ sub p_ms {
   # Subject: Returned mail - nameserver error report
   # X-Listbox-Reason: weilong.ye.wa98@wharton.upenn.edu unknown
   # Lines: 79
-  # 
+  #
   #  --------Message not delivered to the following:
-  # 
+  #
   #  weilong.ye.wa98    No matches to nameserver query
-  # 
+  #
   #  --------Error Detail (phquery V4.4):
-  # 
+  #
   #  The message, "No matches to nameserver query," is generated whenever
   #  the ph nameserver fails to locate either a ph alias or name field that
   #  matches the supplied name.  The usual causes are typographical errors or
@@ -729,34 +832,34 @@ sub p_ms {
   #  determine the correct ph alias for the individuals addressed.  If ph is
   #  not available, try sending to the most explicit form of the name, e.g.,
   #  if mike-fox fails, try michael-fox or michael-j-fox.
-  # 
-  # 
+  #
+  #
   #  --------Unsent Message below:
-  # 
+  #
   # Received: from frodo.listbox.com (frodo.listbox.com [208.210.125.58]) by barter.wharton.upenn.edu with ESMTP (8.9.3 (PHNE_18546)/8.7
   # .1) id MAA14570 for <weilong.ye.wa98@wharton.upenn.edu>; Wed, 18 Sep 2002 12:42:35 -0400 (EDT)
   # Received: by frodo.listbox.com (Postfix, from userid 1003)
-  # 
+  #
 
   # $self->log("p_ms: didn't match domain") and
   return unless $message->head->get("from") =~ /MAILER-DAEMON\@($domain)\b/i;
 
   $domain = $1;
-  
-  # $self->log("p_ms: couldn't find \"--- original message ---\" separator") and 
+
+  # $self->log("p_ms: couldn't find \"--- original message ---\" separator") and
   return unless not $message->is_multipart and
   my ($error_part, $orig_message) = split(/.*-----.*(?:Original message follows|The original message sent:|unsent message below).*/i,
 							$message->bodyhandle->as_string);
-  
-  # $self->log("p_ms: couldn't find \"following message ... errors") and 
+
+  # $self->log("p_ms: couldn't find \"following message ... errors") and
   return unless $error_part =~ /The following addresses had permanent fatal errors|The following errors occurred when trying to deliver the attached mail:|message not delivered/i;
-  
-  # $self->log("p_ms: couldn't find Received: header in orig message.") and 
+
+  # $self->log("p_ms: couldn't find Received: header in orig message.") and
   return unless $orig_message =~ /^Received: from/m;
-  
+
   my @error_lines;
   if ($error_part =~ /error detail.*phquery/i) {
-    @error_lines = (grep { /\S/ } 
+    @error_lines = (grep { /\S/ }
 		    grep { ! /error detail/i }
 		    grep { /message.*not delivered to the following/i .. /error detail/i } split /\n/, $error_part);
   }
@@ -764,7 +867,7 @@ sub p_ms {
     @error_lines = grep { ! /addresses had permanent fatal errors/
 			      &&
 			      ! /The following errors occurred when trying to deliver the attached mail:/
-			      && 
+			      &&
 			      /\S/ } split /\n/, $error_part;
   }
 
@@ -782,7 +885,7 @@ sub p_ms {
     }
   }
   # $self->log("p_ms: rewrote message. new errors: @new_errors") if $DEBUG > 3;
-  
+
   return $self->new_plain_report($message, join ("\n", @new_errors), $orig_message);
 }
 
@@ -796,32 +899,32 @@ sub p_compuserve {
   # To: listbox+trampoline+282+137177+366d45b9@v2.listbox.com
   # X-Listbox-Reason: lallison@compuserve.com user unknown
   # Lines: 81
-  # 
+  #
   # Receiver not found: lallison
-  # 
-  # 
+  #
+  #
   # Your message could not be delivered as addressed.
-  # 
+  #
   # --- Message From Postmaster ---
-  # 
+  #
   # Subject: Addressing CompuServe Mail users
-  # 
+  #
   # Please contact postmaster@compuserve.com if you need additional formatting
   # information for other types of addresses.
-  # 
+  #
   # Cordially,
-  # 
+  #
   # The Electronic Postmaster
-  # 
+  #
   # --- Returned Message ---
-  # 
+  #
   # Sender: listbox+trampoline+282+137177+366d45b9@v2.listbox.com
   # Received: from frodo.listbox.com (frodo.listbox.com [208.210.125.58])
   #         by siaag1af.compuserve.com (8.9.3/8.9.3/SUN-1.14) with ESMTP id MAA16547
   #         for <lallison@compuserve.com>; Wed, 18 Sep 2002 12:40:17 -0400 (EDT)
   # Received: by frodo.listbox.com (Postfix, from userid 1003)
   #         id 65A1F8056; Wed, 18 Sep 2002 12:40:16 -0400 (EDT)
-  # 
+  #
   return if not $message->head->get("from") =~ /\@compuserve\.com/i;
   return if $message->is_multipart;
   return unless $message->bodyhandle->as_string =~ /Receiver not found:/;
@@ -843,24 +946,24 @@ sub p_ims {
   my $self    = shift;
   my $message = shift;
 
-  # 
+  #
   # Your message
-  # 
+  #
   #   To:      slpark@msx.ndc.mc.uci.edu
   #   Subject: Penn Women Paving The Way - Register Now!
   #   Sent:    Thu, 19 Sep 2002 13:40:20 -0700
-  # 
+  #
   # did not reach the following recipient(s):
-  # 
+  #
   # c=US;a= ;p=NDC;o=ORANGE;dda:SMTP=slpark@msx.ndc.mc.uci.edu; on Thu, 19 Sep
   # 2002 13:53:00 -0700
   #     The recipient name is not recognized
   #         The MTS-ID of the original message is: c=us;a=
   # ;p=ndc;l=LEA0209192052TAM7PVWM
   #     MSEXCH:IMS:NDC:ORANGE:LEA 0 (000C05A6) Unknown Recipient
-  # 
-  # 
-  # 
+  #
+  #
+  #
 
   return unless $message->head->get("X-Mailer") =~ /Internet Mail Service/i;
 
@@ -880,29 +983,29 @@ sub p_ims {
     # Content-Transfer-Encoding: 7bit
     # X-Listbox-Reason: jfrancl@sidley.com user unknown
     # Lines: 66
-    # 
+    #
     # Your message
-    # 
+    #
     #   To:      USER_EMAIL@frodo.listbox.com
     #   Subject: You have an online postcard waiting for you!
     #   Sent:    Wed, 18 Sep 2002 11:00:36 -0500
-    # 
+    #
     # did not reach the following recipient(s):
-    # 
+    #
     # jfrancl@sidley.com on Wed, 18 Sep 2002 11:40:15 -0500
     #     The recipient name is not recognized
     #         The MTS-ID of the original message is: c=us;a= ;p=sidley
     # austin;l=CHEXCHANGE10209181640TFHKWW8X
     #     MSEXCH:IMS:Sidley & Austin:Chicago:CHEXCHANGE1 0 (000C05A6) Unknown
     # Recipient
-    # 
-    # 
-    # 
+    #
+    #
+    #
     # -----
     # Message-ID: <E17rhFk-00085B-00@erie.vervehosting.com>
     # From: Bonnie Eisner <owner-afe-chicago@v2.listbox.com>
     # To: USER_EMAIL@frodo.listbox.com
-    # 
+    #
 
     return unless my ($actual_error) = $message->bodyhandle->as_string =~ /did not reach the following recipient\S+\s*(.*)/is;
     my ($stuff_before, $stuff_after) = split /^(?=Message-ID:|Received:)/m, $message->bodyhandle->as_string;
@@ -925,11 +1028,11 @@ sub p_aol_senderblock {
   # Mailer: AIRmail [v90_r2.5]
   # Message-ID: <200302161944.08TTIXHa07448@omr-m05.mx.aol.com>
   # Lines: 4
-  # 
-  # 
+  #
+  #
   # Your mail to the following recipients could not be delivered because they are not accepting mail from giltaylor@hawaii.rr.com:
   #         theetopdog
-  # 
+  #
 
   return unless $message->head->get("Mailer") =~ /AirMail/i;
   return unless $message->effective_type eq "text/plain";
@@ -968,19 +1071,19 @@ sub p_novell_groupwise_5_2 {
   # Content-Type: multipart/mixed; boundary="=_D68A6C30.E687E8F9"
   # X-Listbox-Reason: lsinger@chrismill.com user unknown
   # Lines: 57
-  # 
+  #
   # --=_D68A6C30.E687E8F9
   # Content-Type: text/plain; charset=US-ASCII
   # Content-Disposition: inline
-  # 
+  #
   # The message that you sent was undeliverable to the following:
   #         lsinger (user not found)
-  # 
+  #
   # Possibly truncated original message follows:
-  # 
+  #
   # --=_D68A6C30.E687E8F9
   # Content-Type: message/rfc822
-  # 
+  #
 
   return unless $message->head->get("X-Mailer") =~ /Novell Groupwise/i;
   return unless $message->effective_type eq "multipart/mixed";
@@ -1015,13 +1118,13 @@ sub p_aol_bogus_250 {
   # >>> RCPT To:<robinbw@aol.com>
   # <<< 550 MAILBOX NOT FOUND
   # 550 <robinbw@aol.com>... User unknown
-  # 
+  #
   # --QAM07349.1032468790/rly-xj03.mx.aol.com
   # Content-Type: message/delivery-status
-  # 
+  #
   # Reporting-MTA: dns; rly-xj03.mx.aol.com
   # Arrival-Date: Thu, 19 Sep 2002 16:52:48 -0400 (EDT)
-  # 
+  #
   # Final-Recipient: RFC822; robinbw@aol.com
   # Action: failed
   # Status: 2.0.0
@@ -1071,22 +1174,22 @@ sub p_plain_smtp_transcript {
 
   # sometimes, we have a proper smtp transcript;
   # that means we have enough information to mark the message up into a proper multipart/report!
-  # 
+  #
   # pennwomen-la@v2.listbox.com/200209/19/1032468752.1444_1.frodo
   # The original message was received at Thu, 19 Sep 2002 13:51:36 -0700 (MST)
   # from daemon@localhost
-  # 
+  #
   #    ----- The following addresses had permanent fatal errors -----
   # <friedman@primenet.com>
   #     (expanded from: <friedman@primenet.com>)
-  # 
+  #
   #    ----- Transcript of session follows -----
   # ... while talking to smtp-local.primenet.com.:
   # >>> RCPT To:<friedman@smtp-local.primenet.com>
   # <<< 550 <friedman@smtp-local.primenet.com>... User unknown
   # 550 <friedman@primenet.com>... User unknown
   #    ----- Message header follows -----
-  # 
+  #
   # what we'll do is mark it back up into a proper multipart/report.
 
   return unless $message->effective_type eq "text/plain";
@@ -1126,14 +1229,14 @@ sub construct_delivery_status_paras {
     # Remote-MTA: DNS; air-xj03.mail.aol.com
     # Diagnostic-Code: SMTP; 250 OK
     # Last-Attempt-Date: Thu, 19 Sep 2002 16:53:10 -0400 (EDT)
-    
+
     push @new_output, ["Final-Recipient: RFC822; $email",
 		       "Action: failed",
 		       "Status: 5.0.0",
 		       ($by_email{$email}->{'host'} ? ("Remote-MTA: DNS; $by_email{$email}->{'host'}") : ()),
 		       construct_diagnostic_code(\%by_email, $email),
 		       ];
-    
+
   }
 
   return @new_output;
@@ -1162,7 +1265,7 @@ sub analyze_smtp_transcripts {
       $by_email{$email}->{'smtp_code'} = $1;
       push @{$by_email{$email}->{'errors'}}, $2;
     }
-  
+
     if (/^(\d\d\d)\b.*(<\S+\@\S+>)\.*\s+(.+)/m) {
       $email = cleanup_email($2);
       $by_email{$email}->{'smtp_code'} = $1;
@@ -1179,7 +1282,7 @@ sub analyze_smtp_transcripts {
 
 sub new_plain_report {
   my ($self, $message, $error_text, $orig_message) = @_;
-  
+
   $orig_message =~ s/^\s+//;
 
   my $newmessage = $message->dup();
@@ -1204,7 +1307,7 @@ sub new_plain_report {
 
 sub new_multipart_report {
   my ($self, $message, $error_text, $delivery_status, $orig_message) = @_;
-  
+
   $orig_message =~ s/^\s+//;
 
   my $newmessage = $message->dup();
@@ -1243,7 +1346,44 @@ sub cleanup_email {
   return $email;
 }
 
+sub p_xdelivery_status {
+    my ($self, $message) = @_;
+
+    # This seems to be caused by something called "XWall v3.31", which
+    # (according to Google) is a "firewall that protects your Exchange
+    # server from viruses, spam mail and dangerous attachments".  Shame it
+    # doesn't protect the rest of the world from gratuitously broken MIME
+    # types.
+
+    for ($message->parts_DFS) {
+        $_->effective_type('message/delivery-status')
+            if $_->effective_type eq 'message/xdelivery-status';
+    }
+}
+
+sub first_non_multi_part
+{
+    my ($entity) = @_;
+
+    my $part = $entity;
+    $part = $part->parts(0) or return
+        while $part->is_multipart;
+    return $part;
+}
+
+sub position_before
+{
+    my ($pos_a, $pos_b) = @_;
+    return 1 if defined($pos_a) && (!defined($pos_b) || $pos_a < $pos_b);
+    return;
+}
+
+# Return the position in $string at which $regex first matches, or undef if
+# no match.
+sub match_position
+{
+    my ($string, $regex) = @_;
+    return $string =~ $regex ? $-[0] : undef;
+}
+
 1;
-
-
-
