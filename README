@@ -1,4 +1,4 @@
-Mail/DeliveryStatus/BounceParser version 0.01
+Mail/DeliveryStatus/BounceParser version 1.2
 =============================================
 
 Mail::DeliveryStatus::BounceParser analyzes bounce messages and
@@ -27,8 +27,12 @@ COPYRIGHT AND LICENCE
     Copyright (C) 2003 IC Group, Inc.
 	pobox.com permanent email forwarding with spam filtering
       listbox.com mailing list services
-   Meng Weng Wong <freeside>
+   Meng Weng Wong <mengwong+bounceparser@pobox.com>
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself. 
+
+SHOUT OUT
+
+  to Masque, gbarr, sungo, dngor, and all the other hoopy froods on #perl
 
