@@ -41,7 +41,7 @@ appropriate action can be taken.
 use 5.00503;
 use strict;
 
-$Mail::DeliveryStatus::VERSION = '1.501';
+$Mail::DeliveryStatus::VERSION = '1.510';
 
 use MIME::Parser;
 use Mail::DeliveryStatus::Report;
@@ -83,38 +83,30 @@ sub log {
   return 1;
 }
 
-=head2 new
+=head2 parse
+
+  my $bounce = Mail::DeliveryStatus::BounceParser->parse($message, \%arg);
 
 OPTIONS.  If you pass BounceParser->new(..., {log=>sub { ... }}) That will be
 used as a logging callback.
 
-NON-BOUNCES.  If the message is recognizably a vacation
-autoresponse, or is a report of a transient nonfatal error,
-or a spam or virus autoresponse, you'll still get back a
-$bounce, but its $bounce->is_bounce() will return false.
+NON-BOUNCES.  If the message is recognizably a vacation autoresponse, or is a
+report of a transient nonfatal error, or a spam or virus autoresponse, you'll
+still get back a $bounce, but its $bounce->is_bounce() will return false.
 
-It is possible that some bounces are not really bounces; for
-example, when Hotmail responds with 554 Transaction Failed,
-that just means hotmail was overloaded at the time, so the
-user actually isn't bouncing.  To include such non-bounces
-in the reports, pass the option {report_non_bounces=>1}.
+It is possible that some bounces are not really bounces; for example, when
+Hotmail responds with 554 Transaction Failed, that just means hotmail was
+overloaded at the time, so the user actually isn't bouncing.  To include such
+non-bounces in the reports, pass the option {report_non_bounces=>1}.
+
+For historical reasons, C<new> is an alias for the C<parse> method.
 
 =cut
 
-sub new {
+sub parse {
   my ($class, $data, $arg) = @_;
   # my $bounce = Mail::DeliveryStatus::BounceParser->new( \*STDIN | $fh |
   # "entire\nmessage" | ["array","of","lines"] );
-
-  # It turns out that MIME::Decoder::QuotedPrint (in MIME-tools up to at least
-  # 5.417) assigns to $_ without localizing it first (see
-  # http://rt.cpan.org/NoAuth/Bug.html?id=11802).  There are various code paths
-  # that can lead to QP messages being decoded or encoded, so to simplify
-  # matters, we do this before anything else.
-
-  # XXX: This can probably be removed, as prereq has been raised to 5.418
-  # -- rjbs, 2006-05-26
-  local $_;
 
   my $parser = new MIME::Parser;
      $parser->output_to_core(1);
@@ -496,6 +488,8 @@ sub new {
   return $self;
 }
 
+BEGIN { *new = \&parse };
+
 sub extract_reports {
   my $self = shift;
   # input: either a list of MIME parts, or just a chunk of text.
@@ -579,9 +573,9 @@ sub is_bounce { return shift->{is_bounce}; }
 
 =head2 reports
 
-Each $report returned by $bounce->reports() is basically a
-Mail::Header object with a few modifications.  It includes
-the email address bouncing, and the reason for the bounce.
+Each $report returned by $bounce->reports() is basically a Mail::Header object
+with a few modifications.  It includes the email address bouncing, and the
+reason for the bounce.
 
 Consider an RFC1892 error report of the form
 
@@ -613,9 +607,9 @@ Each "header" above is available through the usual get() mechanism.
   print $report->get('raw') ||           # the original unstructured text
         $report->as_string;              # the original   structured text
 
-Probably the two most useful fields are "email" and
-"std_reason", the standardized reason.  At this time
-BounceParser returns the following standardized reasons:
+Probably the two most useful fields are "email" and "std_reason", the
+standardized reason.  At this time BounceParser returns the following
+standardized reasons:
 
   user_unknown
   over_quota
@@ -625,10 +619,9 @@ BounceParser returns the following standardized reasons:
 
 (no_problemo will only appear if you set {report_non_bounces=>1})
 
-If the bounce message is not structured according to
-RFC1892, BounceParser will still try to return as much
-information as it can; in particular, you can count on
-"email" and "std_reason" to be present.
+If the bounce message is not structured according to RFC1892, BounceParser will
+still try to return as much information as it can; in particular, you can count
+on "email" and "std_reason" to be present.
 
 =cut
 
@@ -636,9 +629,8 @@ sub reports { return @{shift->{reports}} }
 
 =head2 addresses
 
-Returns a list of the addresses which appear to be bouncing.
-Each member of the list is an email address string of the
-form 'foo@bar.com'.
+Returns a list of the addresses which appear to be bouncing.  Each member of
+the list is an email address string of the form 'foo@bar.com'.
 
 =cut
 
@@ -654,8 +646,8 @@ sub orig_message_id { return shift->{orig_message_id}; }
 
 =head2 orig_message
 
-If the original message was included in the bounce, it'll be
-available here as a message/rfc822 MIME entity.
+If the original message was included in the bounce, it'll be available here as
+a message/rfc822 MIME entity.
 
   my $orig_message    = $bounce->orig_message;
 
@@ -665,9 +657,8 @@ sub orig_message { return shift->{orig_message} }
 
 =head2 orig_header
 
-If only the original headers were returned in the
-text/rfc822-headers chunk, they'll be available here as a
-Mail::Header entity.
+If only the original headers were returned in the text/rfc822-headers chunk,
+they'll be available here as a Mail::Header entity.
 
 =cut
 
@@ -675,10 +666,9 @@ sub orig_header { return shift->{orig_header} }
 
 =head2 orig_text
 
-If the bounce message was poorly structured, the above two
-methods won't return anything --- instead, you get back a
-block of text that may or may not approximate the original
-message.  No guarantees.  Good luck.
+If the bounce message was poorly structured, the above two methods won't return
+anything --- instead, you get back a block of text that may or may not
+approximate the original message.  No guarantees.  Good luck.
 
 =cut
 
@@ -693,6 +683,8 @@ you do anything with the email addresses you get back, confirm that it makes
 sense that they might be bouncing --- for example, it doesn't make sense for
 the sender of the original message to show up in the addresses list, but it
 could if the bounce message is sufficiently misformatted.
+
+Still, please report all bugs!
 
 =head1 FREE-FLOATING ANXIETY
 
@@ -731,7 +723,7 @@ We understand bounce messages generated by the following MTAs / organizations:
 
 =head1 SEE ALSO
 
-  Used by http://v2.listbox.com/ --- if you like BounceParser and you know it,
+  Used by http://listbox.com/ --- if you like BounceParser and you know it,
   consider Listbox for your mailing list needs!
 
   Ironically, BounceParser has no mailing list or web site at this time.
@@ -744,14 +736,15 @@ Schwern's modules have the Alexandre Dumas property.
 
 =head1 AUTHOR
 
-Meng Weng Wong, E<lt>mengwong+bounceparser@pobox.comE<gt>
+Original author: Meng Weng Wong, E<lt>mengwong+bounceparser@pobox.comE<gt>
+
+Current maintainer: Ricardo SIGNES, E<lt>rjbs@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-  Copyright (C) 2003 IC Group, Inc.
+  Copyright (C) 2003-2006, IC Group, Inc.
 	pobox.com permanent email forwarding with spam filtering
   listbox.com mailing list services for announcements and discussion
-  Meng Weng Wong <freeside>
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
@@ -1044,7 +1037,8 @@ sub p_ims {
   # ;p=ndc;l=LEA0209192052TAM7PVWM
   #     MSEXCH:IMS:NDC:ORANGE:LEA 0 (000C05A6) Unknown Recipient
 
-  return unless $message->head->get("X-Mailer") =~ /Internet Mail Service/i;
+  return
+    unless ($message->head->get("X-Mailer")||'') =~ /Internet Mail Service/i;
 
   if ($message->is_multipart) {
     return unless my ($error_part)
@@ -1125,7 +1119,7 @@ sub p_aol_senderblock {
   #         theetopdog
   #
 
-  return unless $message->head->get("Mailer") =~ /AirMail/i;
+  return unless ($message->head->get("Mailer")||'') =~ /AirMail/i;
   return unless $message->effective_type eq "text/plain";
   return unless $message->bodyhandle->as_string =~ /Your mail to the following recipients could not be delivered because they are not accepting mail from/i;
 
@@ -1188,7 +1182,7 @@ sub p_novell_groupwise_5_2 {
   # Content-Type: message/rfc822
   #
 
-  return unless $message->head->get("X-Mailer") =~ /Novell Groupwise/i;
+  return unless ($message->head->get("X-Mailer")||'') =~ /Novell Groupwise/i;
   return unless $message->effective_type eq "multipart/mixed";
   return unless my ($error_part)
     = grep { $_->effective_type eq "text/plain" } $message->parts;
