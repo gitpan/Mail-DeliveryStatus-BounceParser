@@ -1,11 +1,11 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         Mail-DeliveryStatus-BounceParser
-version:      1.5
-version_from: BounceParser.pm
+version:      1.501
+version_from: lib/Mail/DeliveryStatus/BounceParser.pm
 installdirs:  site
 requires:
-    MIME::Entity:                  5.404
+    MIME::Entity:                  5.418
 
 distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.17
+generated_by: ExtUtils::MakeMaker version 6.30

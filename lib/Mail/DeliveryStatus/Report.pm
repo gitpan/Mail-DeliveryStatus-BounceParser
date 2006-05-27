@@ -1,6 +1,7 @@
 package Mail::DeliveryStatus::Report;
 
 use Mail::Header;
+use strict;
 use vars qw(@ISA);
 @ISA = qw(Mail::Header);
 
@@ -9,8 +10,9 @@ use vars qw(@ISA);
 
 sub get {
   my $string = $_[0]->SUPER::get($_[1]);
-  chomp($string=(defined $string && length $string) ? $string : "");
-  $string;
+  $string = q{} unless defined $string and length $string;
+  chomp $string;
+  return $string;
 }
 
 1;

@@ -1,5 +1,5 @@
-BounceParser.pm
-Report.pm
+lib/Mail/DeliveryStatus/BounceParser.pm
+lib/Mail/DeliveryStatus/Report.pm
 Changes
 Makefile.PL
 MANIFEST
