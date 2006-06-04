@@ -10,4 +10,4 @@ no_index:
 requires:
   MIME::Entity: 5.418
   perl: 5.00503
-version: 1.510
+version: 1.511

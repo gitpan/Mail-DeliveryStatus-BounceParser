@@ -15,4 +15,6 @@ META.yml
 README
 t/00-load.t
 t/corpus/postfix.msg
+t/pod-coverage.t
+t/pod.t
 t/postfix.t

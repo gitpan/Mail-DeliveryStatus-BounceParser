@@ -41,7 +41,7 @@ appropriate action can be taken.
 use 5.00503;
 use strict;
 
-$Mail::DeliveryStatus::VERSION = '1.510';
+$Mail::DeliveryStatus::VERSION = '1.511';
 
 use MIME::Parser;
 use Mail::DeliveryStatus::Report;
@@ -75,14 +75,6 @@ my @Preprocessors = qw(
   p_xdelivery_status
 );
 
-sub log {
-  my ($self, @log) = @_;
-  if (ref $self->{log} eq "CODE") {
-    $self->{log}->(@_);
-  }
-  return 1;
-}
-
 =head2 parse
 
   my $bounce = Mail::DeliveryStatus::BounceParser->parse($message, \%arg);
@@ -92,7 +84,8 @@ used as a logging callback.
 
 NON-BOUNCES.  If the message is recognizably a vacation autoresponse, or is a
 report of a transient nonfatal error, or a spam or virus autoresponse, you'll
-still get back a $bounce, but its $bounce->is_bounce() will return false.
+still get back a C<$bounce>, but its C<<$bounce->is_bounce()>> will return
+false.
 
 It is possible that some bounces are not really bounces; for example, when
 Hotmail responds with 554 Transaction Failed, that just means hotmail was
@@ -155,7 +148,7 @@ sub parse {
     . $message->head->get("subject")
   );
 
-  my $first_part = first_non_multi_part($message);
+  my $first_part = _first_non_multi_part($message);
 
   # we'll deem autoreplies to be usually less than a certain size.
 
@@ -225,13 +218,13 @@ sub parse {
   if ($message->effective_type eq "text/plain") {
     my $string = $message->bodyhandle->as_string;
     my $forwarded_pos
-      = match_position($string, qr/automatically.{0,40}forwarded/is);
+      = _match_position($string, qr/automatically.{0,40}forwarded/is);
 
     my $orig_msg_pos 
-      = match_position($string, $Returned_Message_Below);
+      = _match_position($string, $Returned_Message_Below);
     if (
       defined($forwarded_pos)
-      && position_before($forwarded_pos, $orig_msg_pos)
+      && _position_before($forwarded_pos, $orig_msg_pos)
     ) {
       $self->log("message forwarding notification, ignoring");
       $self->{is_bounce} = 0;
@@ -258,12 +251,12 @@ sub parse {
 
     if ($part_for_maybe_transient) {
       my $string = $part_for_maybe_transient->bodyhandle->as_string;
-      my $transient_pos = match_position($string, $Not_An_Error);
+      my $transient_pos = _match_position($string, $Not_An_Error);
       last unless defined $transient_pos;
-      my $permanent_pos = match_position($string, $Really_An_Error);
-      my $orig_msg_pos  = match_position($string, $Returned_Message_Below);
-      last if position_before($permanent_pos, $orig_msg_pos);
-      if (position_before($transient_pos, $orig_msg_pos)) {
+      my $permanent_pos = _match_position($string, $Really_An_Error);
+      my $orig_msg_pos  = _match_position($string, $Returned_Message_Below);
+      last if _position_before($permanent_pos, $orig_msg_pos);
+      if (_position_before($transient_pos, $orig_msg_pos)) {
         $self->log("transient error, ignoring.");
         $self->{is_bounce} = 0;
         return $self;
@@ -377,11 +370,11 @@ sub parse {
       $email  =~ s/[^;]+;\s*//; # strip leading RFC822; or LOCAL; or system;
       $reason =~ s/[^;]+;\s*//; # strip leading X-Postfix;
 
-      $email = cleanup_email($email);
+      $email = _cleanup_email($email);
 
       $report->replace(email      => $email);
       $report->replace(reason     => $reason);
-      $report->replace(std_reason => std_reason($report->get("diagnostic-code")));
+      $report->replace(std_reason => _std_reason($report->get("diagnostic-code")));
       $report->replace(
         host => ($report->get("diagnostic-code") =~ /\bhost\s+(\S+)/)
       );
@@ -462,7 +455,7 @@ sub parse {
     # $self->log("error parts: @{[ map { $_->bodyhandle->as_string }
     # @delivery_status_parts ]}") if $DEBUG > 3;
 
-    push @{$self->{reports}}, $self->extract_reports (@delivery_status_parts);
+    push @{$self->{reports}}, $self->_extract_reports(@delivery_status_parts);
 
   } else {
     # handle plain-text responses
@@ -475,13 +468,14 @@ sub parse {
         split $Returned_Message_Below, $message->bodyhandle->as_string, 3;
       # $self->log("splitting on \"$stuff_splitted\", " . length($stuff_before)
       # . " vs " . length($stuff_after) . " bytes.") if $DEBUG > 3;
-      push @{$self->{reports}}, $self->extract_reports ($stuff_before);
+      push @{$self->{reports}}, $self->_extract_reports($stuff_before);
       $self->{orig_text} = $stuff_before;
     } elsif (/(.+)\n\n(.+?Message-ID:.+)/is) {
-      push @{$self->{reports}}, $self->extract_reports ($1);
+      push @{$self->{reports}}, $self->_extract_reports($1);
       $self->{orig_text} = $2;
     } else {
-      push @{$self->{reports}}, $self->extract_reports ($message->bodyhandle->as_string);
+      push @{$self->{reports}},
+        $self->_extract_reports($message->bodyhandle->as_string);
       $self->{orig_text} = $message->bodyhandle->as_string;
     }
   }
@@ -490,11 +484,27 @@ sub parse {
 
 BEGIN { *new = \&parse };
 
-sub extract_reports {
+=head2 log
+
+  $bounce->log($messages);
+
+If a logging callback has been given, the message will be passed to it.
+
+=cut
+
+sub log {
+  my ($self, @log) = @_;
+  if (ref $self->{log} eq "CODE") {
+    $self->{log}->(@_);
+  }
+  return 1;
+}
+
+sub _extract_reports {
   my $self = shift;
   # input: either a list of MIME parts, or just a chunk of text.
 
-  if (@_ > 1) { return map { extract_reports($_) } @_ }
+  if (@_ > 1) { return map { _extract_reports($_) } @_ }
 
   my $text = shift;
 
@@ -525,7 +535,7 @@ sub extract_reports {
     # addressess.
     next if $i % 2 == 0;
 
-    my $email = cleanup_email($split[$i]);
+    my $email = _cleanup_email($split[$i]);
 
     if ($split[$i-1] =~ /they are not accepting mail from/) {
       # aol airmail sender block $self->log("$email is not actually a bouncing
@@ -536,8 +546,8 @@ sub extract_reports {
     # $self->log("looking for the reason that $email bounced...") if $DEBUG > 3;
 
     my $std_reason = "unknown";
-    $std_reason = std_reason($split[$i+1]) if $#split > $i;
-    $std_reason = std_reason($split[$i-1]) if $std_reason eq "unknown";
+    $std_reason = _std_reason($split[$i+1]) if $#split > $i;
+    $std_reason = _std_reason($split[$i-1]) if $std_reason eq "unknown";
 
     # todo:
     # if we can't figure out the reason, if we're in the delivery-status part,
@@ -568,6 +578,15 @@ sub extract_reports {
 
   return @toreturn;
 }
+
+=head2 is_bounce
+
+  if ($bounce->is_bounce) { ... }
+
+This method returns true if the bounce parser thought the message was a bounce,
+and false otherwise.
+
+=cut
 
 sub is_bounce { return shift->{is_bounce}; }
 
@@ -756,7 +775,7 @@ it under the same terms as Perl itself.
 
 =cut
 
-sub std_reason {
+sub _std_reason {
   local $_ = shift;
 
   if (/(domain|host)\s+not\s+found/i) { return "domain_error" }
@@ -939,7 +958,7 @@ sub p_ms {
       unless my ($address, $error) = $error_line =~ /^\s*(\S+) (.*)/;
     # $self->log("considering address $address error $error") if $DEBUG > 3;
     if ($address !~ /\@/) {
-      $address = cleanup_email($address);
+      $address = _cleanup_email($address);
       if ($orig_message =~ /for\s+<(\Q$address\E\@\S+)>/i) {
         push @new_errors, "$1: $error";
         push @new_errors, "$address\@$domain: $error";
@@ -1246,20 +1265,20 @@ sub p_aol_bogus_250 {
   return unless
     ($error_part->bodyhandle->as_string =~ /Diagnostic-Code: .*250 OK/);
 
-  my %by_email = $self->analyze_smtp_transcripts($plain->bodyhandle->as_string);
+  my %by_email = $self->_analyze_smtp_transcripts($plain->bodyhandle->as_string);
 
   my (@new_output, $email);
   # rewrite the diagnostic code in the delivery-status part.
   for (split /\n/, $error_part->bodyhandle->as_string) {
     undef $email if /^$/;
-    $email = cleanup_email($1) if (/^Final-Recipient: .*\s(\S+)$/);
+    $email = _cleanup_email($1) if (/^Final-Recipient: .*\s(\S+)$/);
 
     if (/^Diagnostic-Code:/
         and
         exists $by_email{$email}->{smtp_code}
     ) {
       $self->log("cleaning up AOL bogosity: before, $_");
-      push @new_output, construct_diagnostic_code(\%by_email, $email);
+      push @new_output, _construct_diagnostic_code(\%by_email, $email);
       $self->log("cleaning up AOL bogosity:  after, $new_output[-1]");
     }
     push @new_output, $_ and next;
@@ -1272,7 +1291,7 @@ sub p_aol_bogus_250 {
   return $message;
 }
 
-sub construct_diagnostic_code {
+sub _construct_diagnostic_code {
   my %by_email = %{shift()};
   my $email = shift;
   join (" ",
@@ -1321,12 +1340,12 @@ sub p_plain_smtp_transcript {
     = split /^.*Message (?:header|body) follows.*$/im,
         $message->bodyhandle->as_string, 2;
 
-  my %by_email = $self->analyze_smtp_transcripts($stuff_before);
+  my %by_email = $self->_analyze_smtp_transcripts($stuff_before);
 
-  my @paras = construct_delivery_status_paras(\%by_email);
+  my @paras = _construct_delivery_status_paras(\%by_email);
 
   my @new_output;
-  my ($reporting_mta) = cleanup_email($message->head->get("From")) =~ /\@(\S+)/;
+  my ($reporting_mta) = _cleanup_email($message->head->get("From")) =~ /\@(\S+)/;
 
   chomp (my $arrival_date = $message->head->get("Date"));
 
@@ -1343,7 +1362,7 @@ sub p_plain_smtp_transcript {
   );
 }
 
-sub construct_delivery_status_paras {
+sub _construct_delivery_status_paras {
   my %by_email = %{shift()};
 
   my @new_output;
@@ -1361,7 +1380,7 @@ sub construct_delivery_status_paras {
       "Action: failed",
       "Status: 5.0.0",
       ($by_email{$email}->{host} ? ("Remote-MTA: DNS; $by_email{$email}->{host}") : ()),
-      construct_diagnostic_code(\%by_email, $email),
+      _construct_diagnostic_code(\%by_email, $email),
     ];
 
   }
@@ -1369,7 +1388,7 @@ sub construct_delivery_status_paras {
   return @new_output;
 }
 
-sub analyze_smtp_transcripts {
+sub _analyze_smtp_transcripts {
   my $self = shift;
   my $plain_smtp_transcript = shift;
 
@@ -1377,9 +1396,9 @@ sub analyze_smtp_transcripts {
 
   # parse the text part for the actual SMTP transcript
   for (split /\n\n|(?=>>>)/, $plain_smtp_transcript) {
-    # $self->log("analyze_smtp_transcripts: $_") if $DEBUG > 3;
+    # $self->log("_analyze_smtp_transcripts: $_") if $DEBUG > 3;
 
-    $email = cleanup_email($1) if /RCPT TO:\s*(\S+)/im;
+    $email = _cleanup_email($1) if /RCPT TO:\s*(\S+)/im;
     $by_email{$email}->{host} = $host if $email;
 
     if (/while talking to (\S+)/im) {
@@ -1393,7 +1412,7 @@ sub analyze_smtp_transcripts {
     }
 
     if (/^(\d\d\d)\b.*(<\S+\@\S+>)\.*\s+(.+)/m) {
-      $email = cleanup_email($2);
+      $email = _cleanup_email($2);
       $by_email{$email}->{smtp_code} = $1;
       push @{$by_email{$email}->{errors}}, $3;
     }
@@ -1460,7 +1479,7 @@ sub new_multipart_report {
 
 # ------------------------------------------------------------
 
-sub cleanup_email {
+sub _cleanup_email {
   my $email = shift;
   for ($email) {
     chomp;
@@ -1492,7 +1511,7 @@ sub p_xdelivery_status {
   }
 }
 
-sub first_non_multi_part {
+sub _first_non_multi_part {
   my ($entity) = @_;
 
   my $part = $entity;
@@ -1500,7 +1519,7 @@ sub first_non_multi_part {
   return $part;
 }
 
-sub position_before {
+sub _position_before {
   my ($pos_a, $pos_b) = @_;
   return 1 if defined($pos_a) && (!defined($pos_b) || $pos_a < $pos_b);
   return;
@@ -1508,7 +1527,7 @@ sub position_before {
 
 # Return the position in $string at which $regex first matches, or undef if
 # no match.
-sub match_position {
+sub _match_position {
   my ($string, $regex) = @_;
   return $string =~ $regex ? $-[0] : undef;
 }
