@@ -5,8 +5,7 @@ use Test::More 'no_plan';
 
 use Mail::DeliveryStatus::BounceParser;
 
-# Make sure we don't interpret part of an IP address as a status code
-# See bug #20734
+# Test parsing AOL "sender block" messages
 
 # FH because we're being backcompat to pre-lexical
 sub readfile {
@@ -18,7 +17,7 @@ sub readfile {
   return $text;
 }
 
-my $message = readfile('t/corpus/postfix-smtp-550.msg');
+my $message = readfile('t/corpus/aol-senderblock.msg');
 
 my $bounce = Mail::DeliveryStatus::BounceParser->new($message);
 
@@ -28,5 +27,9 @@ ok($bounce->is_bounce, "it's a bounce, alright");
 
 my ($report) = $bounce->reports;
 
-is($report->get('smtp_code'), 550, "we got the right smtp code");
+is_deeply(
+  [ $bounce->addresses ],
+  [ 'mykewlaolacct@aol.com' ],
+  "We've got the right address",
+);
 

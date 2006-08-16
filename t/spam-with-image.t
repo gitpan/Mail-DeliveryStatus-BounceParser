@@ -5,8 +5,9 @@ use Test::More 'no_plan';
 
 use Mail::DeliveryStatus::BounceParser;
 
-# Make sure we don't interpret part of an IP address as a status code
-# See bug #20734
+# Test an issue where binary image attachments were being parsed,
+# resulting in tons of junk reports for each message.
+# Fixes bug #20751
 
 # FH because we're being backcompat to pre-lexical
 sub readfile {
@@ -18,15 +19,11 @@ sub readfile {
   return $text;
 }
 
-my $message = readfile('t/corpus/postfix-smtp-550.msg');
+my $message = readfile('t/corpus/spam-with-image.msg');
 
 my $bounce = Mail::DeliveryStatus::BounceParser->new($message);
 
 isa_ok($bounce, 'Mail::DeliveryStatus::BounceParser');
 
-ok($bounce->is_bounce, "it's a bounce, alright");
-
-my ($report) = $bounce->reports;
-
-is($report->get('smtp_code'), 550, "we got the right smtp code");
+ok( not ($bounce->reports), "No reports (good)");
 
