@@ -1,7 +1,7 @@
 #!perl -wT
 use strict;
 
-use Test::More 'no_plan';
+use Test::More tests => 2;
 
 use Mail::DeliveryStatus::BounceParser;
 
@@ -25,5 +25,5 @@ my $bounce = Mail::DeliveryStatus::BounceParser->new($message);
 
 isa_ok($bounce, 'Mail::DeliveryStatus::BounceParser');
 
-ok( not ($bounce->reports), "No reports (good)");
+ok( !($bounce->reports), "No reports (good)");
 

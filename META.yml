@@ -1,13 +1,13 @@
-author: 'Ricardo SIGNES <rjbs@cpan.org>'
+author: Ricardo SIGNES <rjbs@cpan.org>
 distribution_type: module
-generated_by: Module::Install version 0.63
+generated_by: Module::Install version 0.64
 license: perl
 name: Mail-DeliveryStatus-BounceParser
-no_index:
-  directory:
+no_index: 
+  directory: 
     - inc
     - t
-requires:
+requires: 
   MIME::Entity: 5.418
   perl: 5.00503
-version: 1.514
+version: 1.515

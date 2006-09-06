@@ -41,7 +41,7 @@ appropriate action can be taken.
 use 5.00503;
 use strict;
 
-$Mail::DeliveryStatus::BounceParser::VERSION = '1.514';
+$Mail::DeliveryStatus::BounceParser::VERSION = '1.515';
 
 use MIME::Parser;
 use Mail::DeliveryStatus::Report;
@@ -322,9 +322,8 @@ sub parse {
   #
 
   if ($message->effective_type eq "multipart/report") {
-    my ($delivery_status) = grep { $_->effective_type eq "message/delivery-status" } $message->parts;
-
-    # $self->log("examining multipart/report...") if $DEBUG > 3;
+    my ($delivery_status) =
+      grep { $_->effective_type eq "message/delivery-status" } $message->parts;
 
     my %global = ("reporting-mta" => undef, "arrival-date"  => undef);
 
@@ -335,16 +334,21 @@ sub parse {
     my $delivery_status_body
       = eval { $delivery_status->bodyhandle->as_string } || '';
 
-    foreach my $para (split /\n\n/, $delivery_status_body) {
+    # Used to be \n\n, but now we allow any number of newlines between
+    # individual per-recipient fields to deal with stupid bug with the IIS SMTP
+    # service.  RFC1894 (2.1, 2.3) is not 100% clear about whether more than
+    # one line is allowed - it just says "preceded by a blank line".  We very
+    # well may put an upper bound on this in the future.
+    #
+    # See IIS test in t/.
+    foreach my $para (split /\n{2,}/, $delivery_status_body) {
       my $report = Mail::Header->new([split /\n/, $para]);
 
-      {
-        # This is to prevent Mail::Header from warning with apparently
-        # reasonable data in place. -- rjbs, 2006-08-07
-        local $^W = 0;
-        $report->combine;
-        $report->unfold;
-      }
+      # Removed a $report->combine here - doesn't seem to work without a tag
+      # anyway... not sure what that was for. - wby 20060823
+
+      # Unfold so message doesn't wrap over multiple lines
+      $report->unfold;
 
       # Some MTAs send unsought delivery-status notifications indicating
       # success; others send RFC1892/RFC3464 delivery status notifications
@@ -369,8 +373,8 @@ sub parse {
         }
       }
 
-      for (qw(Reporting-MTA Arrival-Date)) {
-        $report->replace($_ => $global{$_} ||= $report->get($_))
+      for my $hdr (qw(Reporting-MTA Arrival-Date)) {
+        $report->replace($hdr => $global{$hdr} ||= $report->get($hdr))
       }
 
       next unless my $email = $report->get("original-recipient")
@@ -399,18 +403,22 @@ sub parse {
         } elsif ($status eq "5.2.2") {
           $report->replace(std_reason => "over_quota");
         } else {
-          $report->replace(std_reason => _std_reason($report->get("diagnostic-code")));
+          $report->replace(
+            std_reason => _std_reason($report->get("diagnostic-code"))
+          );
         }
       } else {
-        $report->replace(std_reason => _std_reason($report->get("diagnostic-code")));
+        $report->replace(
+          std_reason => _std_reason($report->get("diagnostic-code"))
+        );
       }
-      $report->replace(
-        host => ($report->get("diagnostic-code") =~ /\bhost\s+(\S+)/)
-      );
+      my ($host) = $report->get("diagnostic-code") =~ /\bhost\s+(\S+)/;
+      $report->replace( host => ($host)) if $host;
 
-      $report->replace(
-        smtp_code => ($report->get("diagnostic-code") =~ /((\d{3})\s|\s(\d{3})(?!\.))/)[0]
-      );
+      my ($code) = $report->get('diagnostic-code') =~
+         m/ ( ( [245] \d{2} ) \s | \s ( [245] \d{2} ) (?!\.) ) /x;
+
+      $report->replace(smtp_code => $code);
 
       if (not $report->get("host")) {
         $report->replace(host => ($report->get("email") =~ /\@(.+)/)[0])
@@ -433,9 +441,6 @@ sub parse {
           next;
         }
       }
-
-      # $self->log("learned about $email: " . $report->get("std_reason")) if
-      # $DEBUG > 3;
 
       push @{$self->{reports}},
         Mail::DeliveryStatus::Report->new([ split /\n/, $report->as_string ]
@@ -781,6 +786,9 @@ Original author: Meng Weng Wong, E<lt>mengwong+bounceparser@pobox.comE<gt>
 
 Current maintainer: Ricardo SIGNES, E<lt>rjbs@cpan.orgE<gt>
 
+Massive contributions to the 1.5xx series were made by William Yardley.
+Ricardo mostly just helped out and managed releases.
+
 =head1 COPYRIGHT AND LICENSE
 
   Copyright (C) 2003-2006, IC Group, Inc.
@@ -808,40 +816,41 @@ sub _std_reason {
     /storage/i          or
     /quota/i            or
     /\s552\s/           or
-    /\s#?5\.2\.2\s/                                   # rfc 1893
+    /\s#?5\.2\.2\s/                                     # rfc 1893
   ) {
     return "over_quota";
   }
 
   my $user_re =
-   '(mailbox|user|recipient|address(ee)?|customer|account|e-?mail|<?\S+?@\S+?>?)';
+   qr'(?: mailbox  | user | recipient | address (?: ee)?
+       | customer | account | e-?mail | <?\S+@\S+>? )'x;
 
   if (
-    /\s5\.1\.[01]\s/ or                               # rfc 1893
-    /$user_re\s+ (\S+\s+)? (is\s+)?                   # Generic
-     ( (un|not\s+) known| [dw]oes\s?n[o']?t 
-     ( exist|found ) | disabled ) /ix or
-    /no\s+(such\s+)?$user_re/i or                     # Gmail and other
-    /inactive user/i or                               # Outblaze
-    /unknown local part/i or                          # Exim(?)
-    /user\s+doesn't\s+have\s+a/i or                   # Yahoo!
-    /account\s+has\s+been\s+(disabled|suspended)/i or # Yahoo!
-    /$user_re\s+(suspended|discontinued)/i or         # everyone.net / other?
-    /unknown\s+$user_re/i or                          # Generic
-    /$user_re\s+(is\s+)?(inactive|unavailable)/i or   # Hotmail, others?
-    /((in|not\s+a\s+)?valid|no such)\s$user_re/i or   # Various
-    /$user_re\s+(was\s+)?not\s+found/i or             # AOL, generic
-    /$user_re \s+ (is\s+)? (currently\s+)?            # ATT, generic
-     (suspended|unavailable)/ix or 
-    /address is administratively disabled/i or        # Unknown
-    /no $user_re\s+(here\s+)?by that name/i or        # Unknown
-    /<\S+@\S+> is invalid/i or                        # Unknown
-    /address.*not known here/i or                     # Unknown
-    /recipient\s+(address\s+)?rejected/i or           # Cox, generic
-    /User.*not\s+listed\s+in/i or                     # Domino
-    /account not activated/i or                       # usa.net
-    /not\s+our\s+customer/i or                        # Comcast
-    /doesn't handle mail for that user/i              # mailfoundry
+    /\s \(? \#? 5\.1\.[01] \)? \s/x or                  # rfc 1893
+    /$user_re\s+ (?:\S+\s+)? (?:is\s+)?                 # Generic
+     (?: (?: un|not\s+) known| [dw]oes\s?n[o']?t 
+     (?: exist|found ) | disabled ) /ix or
+    /no\s+(?:such\s+)?$user_re/i or                     # Gmail and other
+    /inactive user/i or                                 # Outblaze
+    /unknown local part/i or                            # Exim(?)
+    /user\s+doesn't\s+have\s+a/i or                     # Yahoo!
+    /account\s+has\s+been\s+(?:disabled|suspended)/i or # Yahoo!
+    /$user_re\s+(?:suspended|discontinued)/i or         # everyone.net / other?
+    /unknown\s+$user_re/i or                            # Generic
+    /$user_re\s+(?:is\s+)?(?:inactive|unavailable)/i or # Hotmail, others?
+    /(?:(?:in|not\s+a\s+)?valid|no such)\s$user_re/i or # Various
+    /$user_re\s+(?:was\s+)?not\s+found/i or             # AOL, generic
+    /$user_re \s+ (?:is\s+)? (?:currently\s+)?          # ATT, generic
+     (?:suspended|unavailable)/ix or 
+    /address is administratively disabled/i or          # Unknown
+    /no $user_re\s+(?:here\s+)?by that name/i or        # Unknown
+    /<\S+@\S+> is invalid/i or                          # Unknown
+    /address.*not known here/i or                       # Unknown
+    /recipient\s+(?:address\s+)?rejected/i or           # Cox, generic
+    /not\s+listed\s+in\s+Domino/i or                    # Domino
+    /account not activated/i or                         # usa.net
+    /not\s+our\s+customer/i or                          # Comcast
+    /doesn't handle mail for that user/i                # mailfoundry
   ) {
     return "user_unknown";
   }
@@ -1443,7 +1452,9 @@ sub _cleanup_email {
   my $email = shift;
   for ($email) {
     chomp;
-    s/\(.*\)//;
+    # Get rid of parens around addresses like (luser@example.com)
+    # Got rid of earlier /\(.*\)/ - not sure what that was about - wby
+    tr/[()]//d;
     s/^To:\s*//i;
     s/[.:;]+$//;
     s/<(.+)>/$1/;
@@ -1454,6 +1465,8 @@ sub _cleanup_email {
     s/\s+$//;
     # hack to get rid of stuff like "luser@example.com...User"
     s/\.{3}\S+//;
+    # SMTP:foo@example.com
+    s/^SMTP://;
     }
   return $email;
 }
