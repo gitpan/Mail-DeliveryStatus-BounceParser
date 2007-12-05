@@ -1,7 +1,12 @@
-author: Ricardo SIGNES <rjbs@cpan.org>
+--- 
+author: 
+  - Ricardo SIGNES <rjbs@cpan.org>
 distribution_type: module
-generated_by: Module::Install version 0.64
+generated_by: Module::Install version 0.68
 license: perl
+meta-spec: 
+  url: http://module-build.sourceforge.net/META-spec-v1.3.html
+  version: 1.3
 name: Mail-DeliveryStatus-BounceParser
 no_index: 
   directory: 
@@ -10,4 +15,4 @@ no_index:
 requires: 
   MIME::Entity: 5.418
   perl: 5.00503
-version: 1.517
+version: 1.518
