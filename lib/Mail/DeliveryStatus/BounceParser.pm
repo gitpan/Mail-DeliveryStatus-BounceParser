@@ -38,10 +38,11 @@ appropriate action can be taken.
 
 =cut
 
-use 5.00503;
+use 5.006;
 use strict;
 
-$Mail::DeliveryStatus::BounceParser::VERSION = '1.520';
+our $VERSION = '1.520_001';
+$VERSION = eval $VERSION;
 
 use MIME::Parser;
 use Mail::DeliveryStatus::Report;
@@ -73,10 +74,10 @@ my $Returned_Message_Below = qr/(
     (?:original|returned) \s message \s (?:follows|below)
   | (?: this \s is \s a \s copy \s of
       | below \s this \s line \s is \s a \s copy
-    ) .{0,100} \s message
+    ) .{0,100} \s message\.?
   | message \s header \s follows
   | ^ (?:return-path|received|from):
-)/sixm;
+)\s+/sixm;
 
 my @Preprocessors = qw(
   p_ims
@@ -169,6 +170,15 @@ sub parse {
     $self->{type} = "Challenge / Response system autoreply";
     $self->{is_bounce} = 0;
     return $self;
+  }
+
+  {
+	last unless ($message->head->get("X-Bluebottle-Request") and $first_part->stringify_body =~ /This account is protected by Bluebottle/);
+	$self->log("looks like a challenge/response autoresponse; ignoring.");
+    $self->{type} = "Challenge / Response system autoreply";
+    $self->{is_bounce} = 0;
+    return $self;
+
   }
 
   # we'll deem autoreplies to be usually less than a certain size.
@@ -308,7 +318,6 @@ sub parse {
     $self->log("couldn't find original message id.");
   }
 
-
   #
   # try to extract email addresses to identify members.
   # we will also try to extract reasons as much as we can.
@@ -373,7 +382,10 @@ sub parse {
       }
 
       for my $hdr (qw(Reporting-MTA Arrival-Date)) {
-        $report->replace($hdr => $global{$hdr} ||= $report->get($hdr))
+        my $val = $global{$hdr} ||= $report->get($hdr);
+		if (defined($val)) {
+			$report->replace($hdr => $val)
+		}
       }
 
       my $email;
@@ -394,12 +406,19 @@ sub parse {
       my $reason = $report->get("diagnostic-code");
 
       $email  =~ s/[^;]+;\s*//; # strip leading RFC822; or LOCAL; or system;
-      $reason =~ s/[^;]+;\s*//; # strip leading X-Postfix;
+	  if (defined $reason) {
+		$reason =~ s/[^;]+;\s*//; # strip leading X-Postfix;
+	  }
 
       $email = _cleanup_email($email);
 
       $report->replace(email      => $email);
-      $report->replace(reason     => $reason);
+	  if (defined $reason) {
+		$report->replace(reason     => $reason);
+	  } else {
+		$report->delete("reason");
+	  }
+
       if (my $status = $report->get('Status')) {
         # RFC 1893... prefer Status: if it exists and is something we know
         # about
@@ -420,19 +439,35 @@ sub parse {
           std_reason => _std_reason($report->get("diagnostic-code"))
         );
       }
-      my ($host) = $report->get("diagnostic-code") =~ /\bhost\s+(\S+)/;
-      $report->replace( host => ($host)) if $host;
+	  my $diag_code = $report->get("diagnostic-code");
 
-      my ($code) = $report->get('diagnostic-code') =~
+	  my $host;
+	  if (defined $diag_code) {
+		 ($host) = $diag_code =~ /\bhost\s+(\S+)/;
+	  }
+
+      $report->replace(host => ($host)) if $host;
+
+      my ($code);
+	 
+	  if (defined $diag_code) {
+		 ($code) = $diag_code =~
          m/ ( ( [245] \d{2} ) \s | \s ( [245] \d{2} ) (?!\.) ) /x;
+	  }
 
-      $report->replace(smtp_code => $code);
+      if ($code) {
+		$report->replace(smtp_code => $code);
+	  }
 
       if (not $report->get("host")) {
-        $report->replace(host => ($report->get("email") =~ /\@(.+)/)[0])
+		my $email = $report->get("email");
+		if (defined $email) {
+			my $host = ($email =~ /\@(.+)/)[0];
+			$report->replace(host => $host) if $host;
+		}
       }
 
-      if ($report->get("smtp_code") =~ /^2../) {
+      if ($report->get("smtp_code") and ($report->get("smtp_code") =~ /^2../)) {
         $self->log(
           "smtp code is "
           . $report->get("smtp_code")
@@ -493,11 +528,11 @@ sub parse {
 
     if ($body_string =~ $Returned_Message_Below) {
       my ($stuff_before, $stuff_splitted, $stuff_after) =
-        split $Returned_Message_Below, $message->bodyhandle->as_string, 3;
+        split $Returned_Message_Below, $message->bodyhandle->as_string, 2;
       # $self->log("splitting on \"$stuff_splitted\", " . length($stuff_before)
       # . " vs " . length($stuff_after) . " bytes.") if $DEBUG > 3;
       push @{$self->{reports}}, $self->_extract_reports($stuff_before);
-      $self->{orig_text} = $stuff_before;
+      $self->{orig_text} = $stuff_after;
     } elsif ($body_string =~ /(.+)\n\n(.+?Message-ID:.+)/is) {
       push @{$self->{reports}}, $self->_extract_reports($1);
       $self->{orig_text} = $2;
@@ -580,10 +615,14 @@ sub _extract_reports {
       ne "unknown" and $std_reason eq "unknown"
     );
 
+	my $reason = $split[$i-1];
+	$reason =~ s/(.*?). (Your mail to the following recipients could not be delivered)/$2/;
+
     $by_email{$email} = {
       email => $email,
       raw   => join ("", @split[$i-1..$i+1]),
       std_reason => $std_reason,
+	  reason => $reason
     };
   }
 
@@ -652,8 +691,12 @@ standardized reasons:
   user_unknown
   over_quota
   domain_error
+  spam
   unknown
   no_problemo
+
+The "spam" standard reason indicates that the message bounced because the recipient
+considered it spam.
 
 (no_problemo will only appear if you set {report_non_bounces=>1})
 
@@ -805,7 +848,13 @@ it under the same terms as Perl itself.
 sub _std_reason {
   local $_ = shift;
 
-  if (/(?:domain|host)\s+(?:not\s+found|unknown)/i) { return "domain_error" }
+  if (!defined $_) {
+	  return "unknown";
+  }
+
+  if (/(?:domain|host|service)\s+(?:not\s+found|unknown|not\s+known)/i) {
+    return "domain_error"
+  }
 
   if (
     /try.again.later/is or
@@ -859,9 +908,23 @@ sub _std_reason {
     /timed\s+out/i or
     /route\s+to\s+host/i or
     /connection\s+refused/i or
-    /no\s+data\s+record\s+of\s+requested\s+type/i
+    /no\s+data\s+record\s+of\s+requested\s+type/i or
+	/Malformed name server reply/i or
+	/as\s+a\s+relay,\s+but\s+I\s+have\s+not\s+been\s+configured\s+to\s+let/i or
+	/550\s+relay\s+not\s+permitted/i or
+	/550\s+relaying\s+denied/i or
+	/Relay\s+access\s+denied/i or
+	/Relaying\s+denied/i
   ) {
     return "domain_error";
+  }
+
+  if (
+    /Blocked\s+by\s+SpamAssassin/i or
+	/spam\s+rejection/i or
+	/identified\s+SPAM,\s+message\s+permanently\s+rejected/i
+  ) {
+    return "spam";
   }
 
   return "unknown";
