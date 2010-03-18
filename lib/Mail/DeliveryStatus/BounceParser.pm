@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.522';
+our $VERSION = '1.523';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -867,7 +867,8 @@ sub _std_reason {
     /storage/i          or
     /quota/i            or
     /\s552\s/           or
-    /\s#?5\.2\.2\s/                                     # rfc 1893
+    /\s#?5\.2\.2\s/     or                                # rfc 1893
+	/User\s+mailbox\s+exceeds\s+allowed\s+size/
   ) {
     return "over_quota";
   }
@@ -928,7 +929,8 @@ sub _std_reason {
     /Blocked\s+by\s+SpamAssassin/i or
 	/spam\s+rejection/i or
 	/identified\s+SPAM,\s+message\s+permanently\s+rejected/i or
-	/Mail\s+appears\s+to\s+be\s+unsolicited/i
+	/Mail\s+appears\s+to\s+be\s+unsolicited/i or
+	/Message\s+rejected\s+as\s+spam\s+by\s+Content\s+Filtering/i 
   ) {
     return "spam";
   }
