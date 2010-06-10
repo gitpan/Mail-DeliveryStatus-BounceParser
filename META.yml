@@ -1,0 +1,27 @@
+---
+author:
+  - 'Ricardo SIGNES <rjbs@cpan.org>'
+build_requires:
+  ExtUtils::MakeMaker: 6.42
+  Test::More: 0.94
+configure_requires:
+  ExtUtils::MakeMaker: 6.42
+distribution_type: module
+generated_by: 'Module::Install version 0.99'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: Mail-DeliveryStatus-BounceParser
+no_index:
+  directory:
+    - inc
+    - t
+requires:
+  MIME::Entity: 5.418
+  Mail::Header: 2.04
+  perl: 5.6.0
+resources:
+  license: http://dev.perl.org/licenses/
+  repository: http://github.com/rjbs/mail-deliverystatus-bounceparser
+version: 1.524

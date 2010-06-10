@@ -25,8 +25,8 @@ Mail::DeliveryStatus::BounceParser - Perl extension to analyze bounce messages
 Mail::DeliveryStatus::BounceParser analyzes RFC822 bounce messages and returns
 a structured description of the addresses that bounced and the reason they
 bounced; it also returns information about the original returned message
-including the Message-ID.  It works best with RFC1892 delivery reports, but
-will gamely attempt to understand any bounce message no matter what MTA
+	including the Message-ID.  It works best with RFC1892 delivery reports, but
+	will gamely attempt to understand any bounce message no matter what MTA
 generated it.
 
 =head1 DESCRIPTION
@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.523';
+our $VERSION = '1.524';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -205,6 +205,19 @@ sub parse {
     return $self;
   }
 
+  # vacation autoreply tagged in the subject
+  {
+    last if $message->effective_type eq 'multipart/report';
+    last if !$first_part || $first_part->effective_type ne 'text/plain';
+	my $subject = $message->head->get('Subject');
+	last if !defined($subject);
+	last if $subject !~ /^AUTO/;
+	last if $subject !~ /is out of the office/;
+    $self->log("looks like a vacation autoreply, ignoring.");
+    $self->{type} = "vacation autoreply";
+    $self->{is_bounce} = 0;
+    return $self;
+  }
 
   # "Email address changed but your message has been forwarded"
   {
@@ -606,6 +619,11 @@ sub _extract_reports {
       next;
     }
 
+	if($split[$i-1] =~ /A message sent by/) {
+		# sender block
+		next;
+	}
+
     my $std_reason = "unknown";
     $std_reason = _std_reason($split[$i+1]) if $#split > $i;
     $std_reason = _std_reason($split[$i-1]) if $std_reason eq "unknown";
@@ -868,7 +886,10 @@ sub _std_reason {
     /quota/i            or
     /\s552\s/           or
     /\s#?5\.2\.2\s/     or                                # rfc 1893
-	/User\s+mailbox\s+exceeds\s+allowed\s+size/
+	/User\s+mailbox\s+exceeds\s+allowed\s+size/i or
+	/Mailbox\s+size\s+limit\s+exceeded/i or
+	/message\s+size\s+\d+\s+exceeds\s+size\s+limit\s+\d+/i or
+	/max\s+message\s+size\s+exceeded/i
   ) {
     return "over_quota";
   }
@@ -1176,9 +1197,12 @@ sub _analyze_smtp_transcripts {
 
   # parse the text part for the actual SMTP transcript
   for (split /\n\n|(?=>>>)/, $plain_smtp_transcript) {
-    # $self->log("_analyze_smtp_transcripts: $_") if $DEBUG > 3;
-
     $email = _cleanup_email($1) if /RCPT TO:\s*(\S+)/im;
+
+	if (/The\s+following\s+addresses\s+had\s+permanent\s+fatal\s+errors\s+-----\s+\<(.*)\>/im) {
+	  $email = _cleanup_email($1);
+	}
+
     $by_email{$email}->{host} = $host if $email;
 
     if (/while talking to (\S+)/im) {
