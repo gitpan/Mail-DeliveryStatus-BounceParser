@@ -1,7 +1,7 @@
 #!perl -wT
 use strict;
 
-use Test::More tests => 78;
+use Test::More tests => 132;
 
 use Mail::DeliveryStatus::BounceParser;
 
@@ -98,6 +98,43 @@ This is a permanent error; I've given up. Sorry it didn't work out.",
     # Can't really get this since it DNE
     "smtp_code"   =>  '',
   },
+  "yahoo-user-unknown.msg" => {
+	  "reason" => '553 5.3.0 <recipient@example.net>... Address does not     exist',
+	  "smtp_code" => "553",
+  },
+  "user-unknown-polish.msg" => {
+	  # reason is a little ugly
+	  "reason" => '501 5.1.3 Odbiorca <recipient@example.net> nie     istnieje / Recipient <recipient@example.net> does not exist',
+	  "smtp_code" => "501",
+	  },
+  "me-user-unknown.msg" => {
+	  "reason" => '550 5.1.6 recipient no longer on server: recipient@example.net',
+	  "smtp_code" => "550",
+  },
+  "cam-unknown.msg" => {
+	  "reason" => '550-<recipient@example.net> is not a known user on this     system; 550 see http://www.example.net/cs/email/bounce.html',
+	  "smtp_code" => '550',
+  },
+  "rcpt-dne.msg" => {
+	  "reason" => '554 Rcpt <recipient@example.net> does not exist',
+	  "smtp_code" => "554",
+  },
+  "polish-unknown.msg" => {
+		"reason" => "550 5.2.1 Mailbox not available / Konto niedostepne",
+		"smtp_code" => "550"
+	},
+  "mailbox-unknown.msg" => {
+		"reason" => "550 5.7.1 No mailbox found",
+		"smtp_code" => "550",
+	},
+  "deactivated-mailbox.msg" => {
+		"reason" => '551 <recipient@example.net> is a deactivated mailbox',
+		"smtp_code" => "551",
+	},
+	"user-unknown-dne.msg" => {
+		"reason" => "550 Recipient does not exist on this system",
+		"smtp_code" => "550"
+	},
 );
 
 foreach my $file (keys %files_and_responses) {
