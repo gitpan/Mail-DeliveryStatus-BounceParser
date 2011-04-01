@@ -1,7 +1,8 @@
 #!perl -wT
 use strict;
 
-use Test::More tests => 132;
+# Add 6 to this for each case you add to %files_and_responses
+use Test::More tests => 168;
 
 use Mail::DeliveryStatus::BounceParser;
 
@@ -135,6 +136,30 @@ This is a permanent error; I've given up. Sorry it didn't work out.",
 		"reason" => "550 Recipient does not exist on this system",
 		"smtp_code" => "550"
 	},
+	"badrcptto.msg" => {
+		"reason" => "553 sorry, badrcptto(user mail-box not found) (#5.7.1)",
+		"smtp_code" => "553",
+	},
+	"nomailbox.msg" => {
+		"reason" => "550 ** No mail box available for this user **",
+		"smtp_code" => "550",
+	},
+	"doesnotexist.msg" => {
+		"reason" => '550 User [recipient@example.net] does not exist',
+		"smtp_code" => "550",
+	},
+	"doesnotexist2.msg" => {
+		"reason" => "550 Recipient does not exist",
+		"smtp_code" => "550",
+	},
+	"user-unknown-disabled.msg" => {
+		"reason" => "550 5.2.1 The email account that you tried to reach is     disabled. t11si6005099wes.103",
+		"smtp_code" => "550",
+	},
+	"user-unknown-not-active.msg" => {
+		"reason" => '550-recipient@example.net is not an active address at this     host (invalid FreeUK 550 username)',
+		"smtp_code" => "550",
+		},
 );
 
 foreach my $file (keys %files_and_responses) {

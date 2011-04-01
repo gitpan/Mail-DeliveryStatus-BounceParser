@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.525';
+our $VERSION = '1.526';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -184,11 +184,25 @@ sub parse {
   }
 
   {
-    last unless $first_part->stringify_body =~ /Your server requires confirmation/;
+    last unless defined $first_part and $first_part->stringify_body =~ /Your server requires confirmation/;
     $self->log("Looks like a challenge/response autoresponse; ignoring.");
     $self->{type} = "Challenge / Response system autoreply";
     $self->{is_bounce} = 0;
     return $self;
+  }
+
+  {
+    last unless defined $first_part and $first_part->stringify_body =~ /Please add yourself to my Boxbe Guest List/;
+	$self->log("Looks like a challenge/response autoresponse; ignoring.");
+	$self->{type} = "Challenge / Response system autoreply";
+	$self->{is_bounce} = 0;
+  }
+
+  {
+    last unless defined $first_part and $first_part->stringify_body =~ /This\s+is\s+a\s+one-time\s+automated\s+message\s+to\s+confirm\s+that\s+you're\s+listed\s+on\s+my\s+Boxbe\s+Guest\s+List/;
+	$self->log("Looks like a challenge/response autoresponse; ignoring.");
+	$self->{type} = "Challenge / Response system autoreply";
+	$self->{is_bounce} = 0;
   }
 
   # we'll deem autoreplies to be usually less than a certain size.
@@ -322,8 +336,8 @@ sub parse {
       # see MIME::Entity regarding REPLACE
       my $orig_message_id = $orig_message->parts(0)->head->get("message-id");
       if ($orig_message_id) {
-        chomp $orig_message_id;
-        $self->log("extracted original message-id $orig_message_id from the original rfc822/message");
+		$orig_message_id =~ s/(\r|\n)*$//g;
+        $self->log("extracted original message-id [$orig_message_id] from the original rfc822/message");
       } else {
         $self->log("Couldn't extract original message-id from the original rfc822/message");
       }
@@ -404,7 +418,8 @@ sub parse {
       # Some MTAs send unsought delivery-status notifications indicating
       # success; others send RFC1892/RFC3464 delivery status notifications
       # for transient failures.
-      if (my $action = lc $report->get('Action')) {
+      if (defined $report->get('Action') and lc $report->get('Action')) {
+		my $action = lc $report->get('Action');
         $action =~ s/^\s+//;
         if ($action =~ s/^\s*([a-z]+)\b.*/$1/s) {
           # In general, assume that anything other than 'failed' is a
@@ -881,8 +896,8 @@ Original author: Meng Weng Wong, E<lt>mengwong+bounceparser@pobox.comE<gt>
 
 Current maintainer: Ricardo SIGNES, E<lt>rjbs@cpan.orgE<gt>
 
-Massive contributions to the 1.5xx series were made by William Yardley.
-Ricardo mostly just helped out and managed releases.
+Massive contributions to the 1.5xx series were made by William Yardley and
+Michael Stevens.  Ricardo mostly just helped out and managed releases.
 
 =head1 COPYRIGHT AND LICENSE
 
@@ -925,7 +940,8 @@ sub _std_reason {
     /User\s+mailbox\s+exceeds\s+allowed\s+size/i or
     /Mailbox\s+size\s+limit\s+exceeded/i or
     /message\s+size\s+\d+\s+exceeds\s+size\s+limit\s+\d+/i or
-    /max\s+message\s+size\s+exceeded/i
+    /max\s+message\s+size\s+exceeded/i or
+	/Benutzer\s+hat\s+zuviele\s+Mails\s+auf\s+dem\s+Server/i 
   ) {
     return "over_quota";
   }
@@ -962,7 +978,7 @@ sub _std_reason {
     /account not activated/i or                         # usa.net
     /not\s+our\s+customer/i or                          # Comcast
     /doesn't handle mail for that user/i or             # mailfoundry
-    /Address\s+does\s+not\s+exist/i or
+    /$user_re\s+does\s+not\s+exist/i or
     /Recipient\s+<?$EMAIL_ADDR_REGEX>?\s+does\s+not\s+exist/i or
     /recipient\s+no\s+longer\s+on\s+server/i or # me.com
     /is\s+not\s+a\s+known\s+user\s+on\s+this\s+system/i or # cam.ac.uk
@@ -970,7 +986,12 @@ sub _std_reason {
     /Mailbox\s+not\s+available/i or
     /No\s+mailbox\s+found/i or
     /<?$EMAIL_ADDR_REGEX>?\s+is\s+a\s+deactivated\s+mailbox/i or
-    /Recipient\s+does\s+not\s+exist\s+on\s+this\s+system/i
+    /Recipient\s+does\s+not\s+exist\s+on\s+this\s+system/i or
+	/user\s+mail-box\s+not\s+found/i or
+	/No\s+mail\s+box\s+available\s+for\s+this\s+user/i or
+	/User\s+\[\S+\]\s+does\s+not\s+exist/i or
+	/email\s+account\s+that\s+you\s+tried\s+to\s+reach\s+is\s+disabled/i or
+	/not\s+an\s+active\s+address\s+at\s+this\s+host/i
   ) {
     return "user_unknown";
   }
@@ -999,9 +1020,15 @@ sub _std_reason {
     /Mail\s+appears\s+to\s+be\s+unsolicited/i or
     /Message\s+rejected\s+as\s+spam\s+by\s+Content\s+Filtering/i or
     /message\s+looks\s+like\s+SPAM\s+to\s+me/i or
+    /NOT\s+JUNKEMAILFILTER/i or
     /your\s+message\s+has\s+triggered\s+a\s+SPAM\s+block/i or
     /Spam\s+detected/i or
-    /Message\s+looks\s+like\s+spam/i
+    /Message\s+looks\s+like\s+spam/i or
+	/Message\s+content\s+rejected,\s+UBE/i or
+	/Blocked\s+using\s+spam\s+pattern/i or
+	/breaches\s+local\s+URIBL\s+policy/i or
+	/Your\s+email\s+had\s+spam-like\s+header\s+contents/i or
+	/detected\s+as\s+spam/i
   ) {
     return "spam";
   }
