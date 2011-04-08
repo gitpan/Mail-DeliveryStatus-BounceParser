@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.526';
+our $VERSION = '1.527';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -1028,7 +1028,8 @@ sub _std_reason {
 	/Blocked\s+using\s+spam\s+pattern/i or
 	/breaches\s+local\s+URIBL\s+policy/i or
 	/Your\s+email\s+had\s+spam-like\s+header\s+contents/i or
-	/detected\s+as\s+spam/i
+	/detected\s+as\s+spam/i or
+	/Denied\s+due\s+to\s+spam\s+list/i
   ) {
     return "spam";
   }
