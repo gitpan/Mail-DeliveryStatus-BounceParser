@@ -15,15 +15,15 @@ sub readfile {
   return $text;
 }
 
-my $message = readfile('t/corpus/quota-3.msg');
+my $message = readfile('t/corpus/spam-rejection18.msg');
 
 my $bounce = Mail::DeliveryStatus::BounceParser->new($message);
 
 isa_ok($bounce, 'Mail::DeliveryStatus::BounceParser');
-ok($bounce->is_bounce, "It's a bounce");
+ok($bounce->is_bounce, "This is a bounce");
 
 my ($report) = $bounce->reports;
 
 my $std_reason = $report->get("std_reason");
 
-is($std_reason, "over_quota", "std reason is over_quota");
+is($std_reason, "spam", "std reason is spam");

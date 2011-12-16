@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.527';
+our $VERSION = '1.528';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -939,7 +939,6 @@ sub _std_reason {
     /\s#?5\.2\.2\s/     or                                # rfc 1893
     /User\s+mailbox\s+exceeds\s+allowed\s+size/i or
     /Mailbox\s+size\s+limit\s+exceeded/i or
-    /message\s+size\s+\d+\s+exceeds\s+size\s+limit\s+\d+/i or
     /max\s+message\s+size\s+exceeded/i or
 	/Benutzer\s+hat\s+zuviele\s+Mails\s+auf\s+dem\s+Server/i 
   ) {
@@ -991,7 +990,8 @@ sub _std_reason {
 	/No\s+mail\s+box\s+available\s+for\s+this\s+user/i or
 	/User\s+\[\S+\]\s+does\s+not\s+exist/i or
 	/email\s+account\s+that\s+you\s+tried\s+to\s+reach\s+is\s+disabled/i or
-	/not\s+an\s+active\s+address\s+at\s+this\s+host/i
+	/not\s+an\s+active\s+address\s+at\s+this\s+host/i or
+	/not\s+a\s+known\s+user/i
   ) {
     return "user_unknown";
   }
@@ -1029,13 +1029,29 @@ sub _std_reason {
 	/breaches\s+local\s+URIBL\s+policy/i or
 	/Your\s+email\s+had\s+spam-like\s+header\s+contents/i or
 	/detected\s+as\s+spam/i or
-	/Denied\s+due\s+to\s+spam\s+list/i
+	/Denied\s+due\s+to\s+spam\s+list/i or
+	/appears\s+to\s+be\s+unsolicited/i or
+	/antispam\s+checks/i or
+	/Probable\s+Spam/i or
+	/ESETS_SMTP\s+\(spam\)/i or
+	/this\s+message\s+appears\s+to\s+be\s+spam/i or
+	/Spam\s+score\s+\(\S+\)\s+too\s+high/i or
+	/matches\s+a\s+profile\s+the\s+Internet\s+community\s+may\s+consider\s+spam/i or
+	/accepted\s+due\s+to\s+spam\s+filter/i or
+	/content\s+filter\s+rejection/i or
+	/using\s+a\s+mass\s+mailer/i or
+	/Spam\s+email/i or
+	/Spam\s+content\s+matched/i or
+	(/CONTENT\s+REJECT/i and /dspam\s+check/i) or
+	/this\s+email\s+is\s+spam/i or
+	/rejected\s+as\s+spam/i
   ) {
     return "spam";
   }
 
   if (
-    /RESOLVER.RST.RecipSizeLimit/i
+    /RESOLVER.RST.RecipSizeLimit/i or
+	/exceeds\s+size\s+limit/i
   ) {
     return "message_too_large";
   }
