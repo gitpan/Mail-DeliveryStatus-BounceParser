@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.528';
+our $VERSION = '1.529';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -407,7 +407,7 @@ sub parse {
       # added the following line as part of fix for #41874
       $para =~ s/\r/ /g;
 
-      my $report = Mail::Header->new([split /\n/, $para]);
+      my $report = Mail::DeliveryStatus::Report->new([split /\n/, $para]);
 
       # Removed a $report->combine here - doesn't seem to work without a tag
       # anyway... not sure what that was for. - wby 20060823
@@ -477,7 +477,10 @@ sub parse {
         $report->delete("reason");
       }
 
-      if (my $status = $report->get('Status')) {
+      my $status = $report->get('Status');
+      $report->replace(Status => $status) if $status =~ s/ \(permanent failure\)$//;
+
+      if ($status) {
         # RFC 1893... prefer Status: if it exists and is something we know
         # about
         # Not 100% sure about 5.1.0...
@@ -485,12 +488,11 @@ sub parse {
           $report->replace(std_reason => "user_unknown");
         } elsif ($status eq "5.1.2") {
           $report->replace(std_reason => "domain_error");
+        } elsif ($status eq "5.2.1") {
+          $report->replace(std_reason => "user_disabled");
         } elsif ($status eq "5.2.2") {
           $report->replace(std_reason => "over_quota");
-          # this fits my reading of RFC 3463
-          # FIXME: I suspect there's something wrong with the parsing earlier
-          # that this has to be a regexp rather than a straight comparison
-        } elsif ($status =~ /^5\.4\.4/) {
+        } elsif ($status eq "5.4.4") {
           $report->replace(std_reason => "domain_error");
         } else {
           $report->replace(
@@ -516,6 +518,11 @@ sub parse {
       if (defined $diag_code) {
         ($code) = $diag_code =~
          m/ ( ( [245] \d{2} ) \s | \s ( [245] \d{2} ) (?!\.) ) /x;
+      }
+
+      if (!$code && $status) {
+          $code = $status;
+          $code =~ s/\.//g;
       }
 
       if ($code) {
@@ -758,6 +765,7 @@ standardized reasons:
 
   user_unknown
   over_quota
+  user_disabled
   domain_error
   spam
   message_too_large
@@ -1041,7 +1049,7 @@ sub _std_reason {
 	/content\s+filter\s+rejection/i or
 	/using\s+a\s+mass\s+mailer/i or
 	/Spam\s+email/i or
-	/Spam\s+content\s+matched/i or
+	/Spam\s+content/i or
 	(/CONTENT\s+REJECT/i and /dspam\s+check/i) or
 	/this\s+email\s+is\s+spam/i or
 	/rejected\s+as\s+spam/i
@@ -1051,7 +1059,8 @@ sub _std_reason {
 
   if (
     /RESOLVER.RST.RecipSizeLimit/i or
-	/exceeds\s+size\s+limit/i
+	/exceeds\s+size\s+limit/i or
+	/Message\s+too\s+big/i
   ) {
     return "message_too_large";
   }

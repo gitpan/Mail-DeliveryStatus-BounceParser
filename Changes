@@ -1,12 +1,22 @@
 Revision history for Perl extension Mail::DeliveryStatus::BounceParser.
 
+1.529   2012-01-03
+
+        Patches from Ondeej Brablc to improve status parsing.
+		
+        Adds new user_disabled standard reason.
+
+        add another spam detection case (mstevens)
+
+        add another message too large case (mstevens)
+
 1.528	2011-12-09
 
-	Lots more spam detection (mstevens)
+        Lots more spam detection (mstevens)
 	
-	Another case of message too large (mstevens)
+        Another case of message too large (mstevens)
 
-	Fix previously miscategorised corpus message (mstevens)
+        Fix previously miscategorised corpus message (mstevens)
 
 1.527   2011-04-07
 
