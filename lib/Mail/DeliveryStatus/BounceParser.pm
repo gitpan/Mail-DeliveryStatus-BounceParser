@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.529';
+our $VERSION = '1.530';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -999,7 +999,8 @@ sub _std_reason {
 	/User\s+\[\S+\]\s+does\s+not\s+exist/i or
 	/email\s+account\s+that\s+you\s+tried\s+to\s+reach\s+is\s+disabled/i or
 	/not\s+an\s+active\s+address\s+at\s+this\s+host/i or
-	/not\s+a\s+known\s+user/i
+	/not\s+a\s+known\s+user/i or
+	/BAD_RECIPIENT/i
   ) {
     return "user_unknown";
   }
@@ -1052,7 +1053,9 @@ sub _std_reason {
 	/Spam\s+content/i or
 	(/CONTENT\s+REJECT/i and /dspam\s+check/i) or
 	/this\s+email\s+is\s+spam/i or
-	/rejected\s+as\s+spam/i
+	/rejected\s+as\s+spam/i or
+	/MCSpamSignature/i or
+	/identified\s+as\s+spam/i
   ) {
     return "spam";
   }
