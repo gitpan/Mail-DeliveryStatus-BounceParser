@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.530';
+our $VERSION = '1.531';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -948,7 +948,8 @@ sub _std_reason {
     /User\s+mailbox\s+exceeds\s+allowed\s+size/i or
     /Mailbox\s+size\s+limit\s+exceeded/i or
     /max\s+message\s+size\s+exceeded/i or
-	/Benutzer\s+hat\s+zuviele\s+Mails\s+auf\s+dem\s+Server/i 
+	/Benutzer\s+hat\s+zuviele\s+Mails\s+auf\s+dem\s+Server/i or
+	/exceeded\s+its\s+disk\s+space\s+limit/i
   ) {
     return "over_quota";
   }
@@ -1055,7 +1056,10 @@ sub _std_reason {
 	/this\s+email\s+is\s+spam/i or
 	/rejected\s+as\s+spam/i or
 	/MCSpamSignature/i or
-	/identified\s+as\s+spam/i
+	/identified\s+as\s+spam/i or
+	/Spamming\s+not\s+allowed/i or
+	/classified\s+as\s+spam/i or
+      /Message\s+refused\s+by\s+MailMarshal\s+SpamProfiler/i
   ) {
     return "spam";
   }
@@ -1063,7 +1067,8 @@ sub _std_reason {
   if (
     /RESOLVER.RST.RecipSizeLimit/i or
 	/exceeds\s+size\s+limit/i or
-	/Message\s+too\s+big/i
+	/Message\s+too\s+big/i or
+	/RESOLVER.RST.SendSizeLimit/i
   ) {
     return "message_too_large";
   }
