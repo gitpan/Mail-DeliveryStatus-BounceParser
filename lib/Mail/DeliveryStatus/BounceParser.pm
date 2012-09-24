@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.531';
+our $VERSION = '1.532';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -1059,7 +1059,12 @@ sub _std_reason {
 	/identified\s+as\s+spam/i or
 	/Spamming\s+not\s+allowed/i or
 	/classified\s+as\s+spam/i or
-      /Message\s+refused\s+by\s+MailMarshal\s+SpamProfiler/i
+    /Message\s+refused\s+by\s+MailMarshal\s+SpamProfiler/i or
+	/Your\s+email\s+appears\s+similar\s+to\s+spam/i or
+	/This\s+message\s+scored\s+\S+\s+spam\s+points\s+and\s+has\s+been\s+rejected/i or
+	/Spam\s+Blocked/i or
+	/bulk\s+e?mail/i or
+	/probably\s+spam/i
   ) {
     return "spam";
   }
@@ -1068,7 +1073,8 @@ sub _std_reason {
     /RESOLVER.RST.RecipSizeLimit/i or
 	/exceeds\s+size\s+limit/i or
 	/Message\s+too\s+big/i or
-	/RESOLVER.RST.SendSizeLimit/i
+	/RESOLVER.RST.SendSizeLimit/i or
+	/Message\s+Rejected\s+Class=size/i
   ) {
     return "message_too_large";
   }
