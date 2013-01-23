@@ -42,7 +42,7 @@ use 5.006;
 use strict;
 use warnings;
 
-our $VERSION = '1.532';
+our $VERSION = '1.533';
 $VERSION = eval $VERSION;
 
 use MIME::Parser;
@@ -693,6 +693,7 @@ sub _extract_reports {
     my $reason = $split[$i-1];
     $reason =~ s/(.*?). (Your mail to the following recipients could not be delivered)/$2/;
 
+	$self->log("extracted a reason [$reason]");
     $by_email{$email} = {
       email => $email,
       raw   => join ("", @split[$i-1..$i+1]),
@@ -705,6 +706,7 @@ sub _extract_reports {
 
   foreach my $email (keys %by_email) {
     my $report = Mail::DeliveryStatus::Report->new();
+	$report->modify(1);
     $report->header_hashref($by_email{$email});
     push @toreturn, $report;
   }
@@ -1064,7 +1066,9 @@ sub _std_reason {
 	/This\s+message\s+scored\s+\S+\s+spam\s+points\s+and\s+has\s+been\s+rejected/i or
 	/Spam\s+Blocked/i or
 	/bulk\s+e?mail/i or
-	/probably\s+spam/i
+	/probably\s+spam/i or
+	/appears\s+to\s+be\s+SPAM/i or
+         /SPAM NOT ACCEPTED/i
   ) {
     return "spam";
   }
